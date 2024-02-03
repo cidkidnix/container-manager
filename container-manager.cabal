@@ -1,0 +1,88 @@
+cabal-version:      3.0
+name:               container-manager
+version:            0.1.0.0
+-- synopsis:
+-- description:
+license:            MIT
+license-file:       LICENSE
+author:             cidkidnix
+maintainer:         cidkidnix@protonmail.com
+-- copyright:
+category:           System
+build-type:         Simple
+extra-doc-files:    CHANGELOG.md
+-- extra-source-files:
+
+common warnings
+    ghc-options: -Wall
+
+library
+    import:           warnings
+    exposed-modules:  ContainerManager.Server,
+                      ContainerManager.Client,
+                      ContainerManager.Cli,
+                      ContainerManager.Shared,
+                      ContainerManager.Types,
+                      ContainerManager.Mount,
+                      ContainerManager.Logger
+
+    build-depends:    base ^>=4.17.2.1,
+                      bytestring,
+                      network,
+                      aeson,
+                      text,
+                      time,
+                      binary,
+                      async,
+                      linux-mount,
+                      unix,
+                      containers,
+                      binary-instances,
+                      directory,
+                      transformers,
+                      udev,
+                      utf8-string,
+                      stm,
+                      process,
+                      filepath,
+                      hinotify
+
+    hs-source-dirs:   src
+    default-language: Haskell2010
+    ghc-options: -threaded
+
+executable container-util
+  import: warnings
+  main-is: Cli.hs
+  build-depends:
+    base ^>=4.17.2.1,
+    container-manager,
+    hostname,
+    text,
+    network,
+    optparse-applicative
+  hs-source-dirs: exe
+  default-language: Haskell2010
+  ghc-options: -threaded
+
+executable server
+  import: warnings
+  main-is: Server.hs
+  build-depends:
+    base ^>=4.17.2.1,
+    container-manager
+  hs-source-dirs: exe
+  default-language: Haskell2010
+  ghc-options: -threaded
+
+executable client
+  import: warnings
+  main-is: Client.hs
+  build-depends:
+    base ^>=4.17.2.1,
+    container-manager,
+    hostname,
+    text
+  hs-source-dirs: exe
+  default-language: Haskell2010
+  ghc-options: -threaded
