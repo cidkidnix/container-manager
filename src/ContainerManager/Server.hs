@@ -16,6 +16,7 @@ import Data.Text (Text)
 import qualified Data.Map as Map
 import Data.Map (Map)
 import Data.Set (Set)
+import qualified Data.Set as Set
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Reader
 import System.UDev hiding (Action, Add, Remove)
@@ -33,6 +34,36 @@ import qualified System.Posix.Types as POSIX
 import qualified System.Posix.Files as POSIX
 import System.FilePath
 import System.Directory
+
+udevEventStarter :: TChan Message -> IO ()
+udevEventStarter conn = withUDev $ \interface -> do
+    enum <- newEnumerate interface
+    addMatchSubsystem enum "hidraw"
+    scanDevices enum
+    entry <- getListEntry enum
+    case entry of
+      Just l -> do
+          name <- getName l
+          v <- newFromSysPath interface name
+          devices <- getDevices interface l
+          flip mapM_ ((Set.fromList [getDevnode v]) <> devices) $ \case
+            Just dev -> do
+              atomically $ writeTChan conn $ UDevEvent Add (convertNode dev)
+              print dev
+            Nothing -> pure ()
+      _ -> pure ()
+
+getDevices :: UDev -> List -> IO (Set (Maybe BS.ByteString))
+getDevices udev list  = getNext list >>= \case
+    Nothing -> do
+        path <- getName list
+        v <- newFromSysPath udev path
+        pure $ Set.fromList [getDevnode v]
+    Just l -> do
+        devices <- getDevices udev l
+        curName <- getName l
+        v <- newFromSysPath udev curName
+        pure $ devices <> Set.fromList [getDevnode v]
 
 udevWatcher :: TChan Message -> IO ()
 udevWatcher conn = withUDev $ \interface -> do
@@ -67,7 +98,7 @@ server = do
     forkIO $ handleLogs logQ
     forkIO $ udevWatcher broadcast
     forever $ do
-      print "Got Data from socket"
+      logLevel logQ Info "Got Data from socket"
       (sock', _peer) <- accept containerConnect
       (recv'' :: Maybe BS.ByteString) <- recvMessage sock'
       case (A.decode . BS.fromStrict) <$> recv'' of
@@ -84,6 +115,7 @@ server = do
             liftIO $ messageServer newSocket queue outboundQ
             heartbeat
             liftIO $ forkIO $ do
+                udevEventStarter broadcast
                 udevChan <- atomically $ dupTChan broadcast
                 forever $ do
                   message <- atomically $ readTChan udevChan

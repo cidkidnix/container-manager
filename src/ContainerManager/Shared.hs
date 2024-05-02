@@ -102,7 +102,6 @@ handleLogs :: TQueue Text -> IO ()
 handleLogs logQ = void $ forkIO $ forever $ do
     threadDelay second
     msg <- atomically $ flushTQueue logQ
-    --logLevel logQ Info $ "Length of logs to handle: " <> (T.pack $ show (length msg))
     mapM_ (putStrLn . T.unpack) msg
 
 

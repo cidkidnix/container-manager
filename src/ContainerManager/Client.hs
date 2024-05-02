@@ -66,7 +66,6 @@ setupClient name = do
           liftIO $ handleLogs logQ
           messageHandler
           liftIO $ forever $ threadDelay $ 1000 * second
-        --threadDelay second
       _ -> pure ()
 
 
