@@ -95,10 +95,7 @@ safeSend :: Socket -> ByteString -> (IO () -> IO ())
 safeSend sock msg f = do
     (r :: Either IOException ()) <- try $ sendAll sock msg
     case r of
-      Left e  -> do
-          print "FUCK"
-          print e
-          pure ()
+      Left e  -> pure ()
       Right _ -> f
 
 handleLogs :: TQueue Text -> IO ()
@@ -141,9 +138,7 @@ outboundQueue :: Socket -> TQueue Message -> IO ()
 outboundQueue conn queue = void $ forkIO $ forever $ do
         queue' <- atomically $ flushTQueue queue
         flip mapM_ queue' $ \msg -> do
-            print queue'
             threadDelay 1000
-            print msg
             sendMessage conn msg
 
 sendMessageQ :: TQueue Message -> Message -> IO ()

@@ -22,7 +22,9 @@ library
                       ContainerManager.Client,
                       ContainerManager.Cli,
                       ContainerManager.Shared,
-                      ContainerManager.Types
+                      ContainerManager.Types,
+                      ContainerManager.Mount
+
     build-depends:    base ^>=4.17.2.1,
                       bytestring,
                       network,
@@ -40,7 +42,8 @@ library
                       udev,
                       utf8-string,
                       stm,
-                      process
+                      process,
+                      filepath
 
     hs-source-dirs:   src
     default-language: Haskell2010

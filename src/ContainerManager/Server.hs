@@ -5,6 +5,7 @@ module ContainerManager.Server where
 
 import ContainerManager.Types
 import ContainerManager.Shared
+import qualified ContainerManager.Mount as Mount
 
 import Network.Socket
 import Control.Monad
@@ -13,12 +14,11 @@ import Data.Time.Clock
 import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Map as Map
-import qualified System.Linux.Mount as Mount
 import Data.Map (Map)
 import Data.Set (Set)
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Reader
-import System.UDev
+import System.UDev hiding (Action, Add, Remove)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.UTF8 as BLU
@@ -30,8 +30,11 @@ import qualified Data.Aeson as A
 
 import Control.Concurrent.Async
 import qualified System.Posix.Types as POSIX
+import qualified System.Posix.Files as POSIX
+import System.FilePath
+import System.Directory
 
-udevWatcher :: TQueue Message -> IO ()
+udevWatcher :: TChan Message -> IO ()
 udevWatcher conn = withUDev $ \interface -> do
     monitor <- newFromNetlink interface UDevId
     filterAddMatchSubsystemDevtype monitor (BS.toStrict $ BLU.fromString "hidraw") Nothing
@@ -45,8 +48,7 @@ udevWatcher conn = withUDev $ \interface -> do
       let action = getAction dev
       case (node, action) of
         (Just node', Just action') -> do
-            putStrLn $ "Notified container about new hidraw devices " <> show action' <> " " <> show node'
-            sendMessageQ conn $ UDevEvent (convertAction action') (convertNode node')
+            atomically $ writeTChan conn $ UDevEvent (convertAction action') (convertNode node')
         _ -> pure ()
 
 initializeSocket :: Text -> IO Socket
@@ -57,23 +59,13 @@ initializeSocket moveToLOC = do
     listen containerConnect 5
     pure containerConnect
 
---setupSTM :: IO ()
---setupSTM = do
---    heartbeat <- newTVarIO (mempty :: Map Text (Socket, UTCTime))
---    queue <- newTQueueIO
---    mounts <- newTVarIO (mempty :: Map Text (Set FilePath))
---    logQ <- newTQueueIO
---    outboundQ <- newTQueueIO
---    pure (heartbeat, queue, mounts, logQ, outboundQ)
-
-
 server :: IO ()
 server = do
     containerConnect <- initializeSocket "/tmp/container-manager-bouncer.sock"
     logQ <- newTQueueIO
+    broadcast <- newBroadcastTChanIO
     forkIO $ handleLogs logQ
-
-
+    forkIO $ udevWatcher broadcast
     forever $ do
       print "Got Data from socket"
       (sock', _peer) <- accept containerConnect
@@ -81,8 +73,8 @@ server = do
       case (A.decode . BS.fromStrict) <$> recv'' of
         Just (Just (Setup container)) -> do
           putStrLn $ "Okay Setting up conatiner " <> T.unpack container
-          newSocket <- initializeSocket $ "/tmp/container-manager-" <> container <> ".sock"
-          sendMessage sock' $ MoveToSocket $ MoveTo $ "/tmp/container-manager-" <> container <> ".sock"
+          newSocket <- initializeSocket $ "/yacc" </> container </> "container-manager.sock"
+          sendMessage sock' $ MoveToSocket $ MoveTo $ "/yacc" </> "container-manager.sock"
           heartbeat' <- newTVarIO (mempty :: Map Text (Socket, UTCTime))
           queue <- newTQueueIO
           mounts <- newTVarIO (mempty :: Map Text (Set FilePath))
@@ -91,17 +83,23 @@ server = do
             messageHandler
             liftIO $ messageServer newSocket queue outboundQ
             heartbeat
-            liftIO $ forkIO $ udevWatcher outboundQ
+            liftIO $ forkIO $ do
+                udevChan <- atomically $ dupTChan broadcast
+                forever $ do
+                  message <- atomically $ readTChan udevChan
+                  sendMessageQ outboundQ message
+                  case message of
+                    UDevEvent Add node -> do
+                      let fileName = takeFileName $ T.unpack $ unNode node
+                          hackPath = "/tmp/hidraw_hack"
+                      createDirectoryIfMissing True hackPath
+                      Mount.bind (T.unpack $ unNode node) $ hackPath </> fileName
+                    UDevEvent Remove node -> do
+                        pure ()
+
+                    _ -> pure ()
             liftIO $ forever $ threadDelay 1000000
         _ -> pure ()
-    --(heartbeat', queue, mounts, logQ, outboundQ) <- setupSTM
-    --clientCount <- newTVarIO 0
-    --flip runReaderT (HostContext mounts heartbeat' queue clientCount logQ outboundQ) $ do
-    --  messageHandler
-    --  liftIO $ handleLogs logQ
-    --  liftIO $ messageServer containerConnect clientCount queue
-    --  heartbeat
-    --  liftIO $ forever $ threadDelay 1000000
 
 heartbeat :: MonadIO m => ReaderT HostContext m ()
 heartbeat = do
@@ -156,7 +154,6 @@ messageHandler = do
           Just (Setup container) -> do
               logContainer logQ Info container "Requested Setup!"
               -- Run Client specific Daemons, such as udev events
-              forkIO $ udevWatcher outboundQ
               sendMessageQ outboundQ (Configure def)
           -- We don't respond to these requests
           Just a -> do
