@@ -43,7 +43,7 @@ library
                       utf8-string,
                       stm,
                       process,
-                      filepath
+                      filepath,
 
     hs-source-dirs:   src
     default-language: Haskell2010
@@ -54,7 +54,9 @@ executable container-manager
     main-is:          Main.hs
     build-depends:
         base ^>=4.17.2.1,
-        container-manager
+        container-manager,
+        hostname,
+        text
 
     hs-source-dirs:   exe
     default-language: Haskell2010

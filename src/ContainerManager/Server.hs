@@ -95,7 +95,9 @@ server = do
                       createDirectoryIfMissing True hackPath
                       Mount.bind (T.unpack $ unNode node) $ hackPath </> fileName
                     UDevEvent Remove node -> do
-                        pure ()
+                        let fileName = takeFileName $ T.unpack $ unNode node
+                            hackPath = "/yacc" </> T.unpack container </> "hidraw_hack"
+                        Mount.umount $ hackPath </> fileName
 
                     _ -> pure ()
             liftIO $ forever $ threadDelay 1000000
