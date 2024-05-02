@@ -19,6 +19,10 @@ import qualified Control.Exception as E
 import qualified Data.Text as T
 import Data.Text (Text)
 import Data.IORef
+import qualified System.UDev as UDev
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BSL
+import qualified Data.ByteString.Lazy.UTF8 as BLU -- from utf8-strin
 
 sendMessage :: ToJSON a => Socket -> a -> IO ()
 sendMessage sock msg = do
@@ -91,3 +95,12 @@ logLevel lvl msg = putStrLn $ (T.unpack (withColor lvl ("[" <> prettyName lvl <>
 
 second :: Int
 second = 1000000
+
+convertAction :: UDev.Action -> Action
+convertAction = \case
+    UDev.Add -> Add
+    UDev.Remove -> Remove
+    _ -> error "Not yet implemented!"
+
+convertNode :: BS.ByteString -> Node
+convertNode = Node . T.pack . BLU.toString . BS.fromStrict

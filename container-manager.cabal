@@ -40,7 +40,9 @@ library
                       containers,
                       binary-instances,
                       directory,
-                      transformers
+                      transformers,
+                      udev,
+                      utf8-string
 
     hs-source-dirs:   src
     default-language: Haskell2010

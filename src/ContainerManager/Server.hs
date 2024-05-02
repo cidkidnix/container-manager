@@ -1,5 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
 module ContainerManager.Server where
 
 import ContainerManager.Types
@@ -23,6 +24,28 @@ import Data.Set (Set)
 import Control.Concurrent.Async
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Reader
+import System.UDev
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BSL
+import qualified Data.ByteString.Lazy.UTF8 as BLU -- from utf8-strin
+
+udevWatcher :: Socket -> IO ()
+udevWatcher conn = withUDev $ \interface -> do
+    enumerate <- newEnumerate interface
+    monitor <- newFromNetlink interface UDevId
+    filterAddMatchSubsystemDevtype monitor (BS.toStrict $ BLU.fromString "hidraw") Nothing
+    enableReceiving monitor
+    monitorFD <- getFd monitor
+    forever $ do
+      threadWaitRead monitorFD
+      print $ "RECEIVING DEVICE"
+      dev <- receiveDevice monitor
+      let node = getDevnode dev
+      let action = getAction dev
+      case (node, action) of
+        (Just node', Just action') -> do
+            sendMessage conn $ UDevEvent (convertAction action') (convertNode node')
+        _ -> pure ()
 
 server :: IO ()
 server = do
@@ -71,6 +94,7 @@ messageHandler = do
            (UnbindHost path container) -> do
                logContainer Info container $ "Unbinding " <> T.pack path <> " from container " <> container
                Mount.umount ("/tmp/" <> T.unpack container <> "/" <> "test")
+           (UDevEvent _ _) -> error "Why did you send this?"
            (HeartBeat beat client) -> do
                r <- readIORef heartbeatRef
                let exists = Map.lookup client r
@@ -82,6 +106,7 @@ messageHandler = do
                sendMessage conn (Acknowledge ACK (HeartBeat beat client))
            (Setup container) -> do
                logContainer Info container "Requested Setup!"
+               forkIO $ udevWatcher conn
                sendMessage conn (Configure def)
            -- We don't respond to these requests
            a -> do

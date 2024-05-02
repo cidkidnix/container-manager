@@ -76,4 +76,8 @@ messageHandler = do
               putStrLn source
           (Acknowledge ACK (HeartBeat time _)) -> do
               writeIORef heartbeatAck time
+          (UDevEvent action node) -> do
+              putStrLn $ "Node: " <> (T.unpack $ unNode node)
+              putStrLn $ "Action: " <> show action
+
           a -> logLevel Warning $ prettyName a

@@ -41,11 +41,25 @@ data Message = BindHost FilePath FilePath Text
              | Setup Text
              | Configure Config
              | Acknowledge ACK Message
+             | UDevEvent Action Node
              | Shutdown
              deriving (Show, Eq, Ord, Generic)
 
 instance ToJSON Message
 instance FromJSON Message
+
+newtype Node = Node { unNode :: Text }
+  deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON Node
+instance FromJSON Node
+
+data Action = Remove
+            | Add
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON Action
+instance FromJSON Action
 
 data Config = Config
   { _socket_dir :: FilePath
@@ -84,6 +98,7 @@ instance PrettyName Message where
       HeartBeat _ _ -> "HeartBeat"
       Setup _ -> "Setup"
       Configure _ -> "Configuration"
+      UDevEvent _ _ -> "UDevEvent"
       Acknowledge a msg -> case a of
         ACK -> "ACK " <> prettyName msg
         NACK -> "NACK " <> prettyName msg
