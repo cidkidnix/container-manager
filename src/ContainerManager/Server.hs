@@ -115,7 +115,9 @@ server = do
             liftIO $ messageServer newSocket queue outboundQ
             heartbeat
             liftIO $ forkIO $ do
-                udevEventStarter broadcast
+                forkIO $ do
+                    threadDelay (3 * second)
+                    udevEventStarter broadcast
                 udevChan <- atomically $ dupTChan broadcast
                 forever $ do
                   message <- atomically $ readTChan udevChan
