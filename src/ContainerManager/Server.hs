@@ -73,8 +73,8 @@ server = do
       case (A.decode . BS.fromStrict) <$> recv'' of
         Just (Just (Setup container)) -> do
           putStrLn $ "Okay Setting up conatiner " <> T.unpack container
-          newSocket <- initializeSocket $ "/yacc" </> container </> "container-manager.sock"
-          sendMessage sock' $ MoveToSocket $ MoveTo $ "/yacc" </> "container-manager.sock"
+          newSocket <- initializeSocket $ T.pack $ "/yacc" </> T.unpack container </> "container-manager.sock"
+          sendMessage sock' $ MoveToSocket $ MoveTo $ T.pack $ "/yacc" </> "container-manager.sock"
           heartbeat' <- newTVarIO (mempty :: Map Text (Socket, UTCTime))
           queue <- newTQueueIO
           mounts <- newTVarIO (mempty :: Map Text (Set FilePath))
