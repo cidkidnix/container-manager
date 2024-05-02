@@ -97,7 +97,9 @@ server = do
                     UDevEvent Remove node -> do
                         let fileName = takeFileName $ T.unpack $ unNode node
                             hackPath = "/yacc" </> T.unpack container </> "hidraw_hack"
-                        Mount.umount $ hackPath </> fileName
+                        exists <- doesPathExist $ hackPath </> fileName
+                        when exists $ do
+                            Mount.umount $ hackPath </> fileName
 
                     _ -> pure ()
             liftIO $ forever $ threadDelay 1000000
