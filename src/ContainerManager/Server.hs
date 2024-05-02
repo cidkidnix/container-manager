@@ -91,7 +91,7 @@ server = do
                   case message of
                     UDevEvent Add node -> do
                       let fileName = takeFileName $ T.unpack $ unNode node
-                          hackPath = "/tmp/hidraw_hack"
+                          hackPath = "/yacc" </> container </> "hidraw_hack"
                       createDirectoryIfMissing True hackPath
                       Mount.bind (T.unpack $ unNode node) $ hackPath </> fileName
                     UDevEvent Remove node -> do
