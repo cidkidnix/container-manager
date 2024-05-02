@@ -24,7 +24,7 @@ import Control.Concurrent.STM
 import qualified Data.Aeson as A
 
 client :: IO ()
-client = setupClient "client0"
+client = setupClient "Steam"
 
 client2 :: IO ()
 client2 = setupClient "client1"
