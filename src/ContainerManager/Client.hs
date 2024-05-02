@@ -108,7 +108,7 @@ messageHandler = do
        Just Shutdown -> exit
        Just (UDevEvent action node) -> do
            let fileName = takeFileName $ T.unpack $ unNode node
-               hackPath = "/yacc/hidraw_hack"
+               hackPath = "/yacc/udev"
            case action of
              Add -> do
                 Mount.bind (hackPath </> fileName) $ T.unpack $ unNode node
