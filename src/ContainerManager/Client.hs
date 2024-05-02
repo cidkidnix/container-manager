@@ -12,72 +12,99 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Reader
 
+
+import qualified Data.ByteString as BS
+
+import Control.Concurrent.Async
 import Data.Time
 import qualified Data.Text as T
 import Data.Text (Text)
-import Data.IORef
-import Safe
 
+import Control.Concurrent.STM
+import qualified Data.Aeson as A
 
 client :: IO ()
-client = setupClient "client1"
+client = setupClient "client0"
 
 client2 :: IO ()
-client2 = setupClient "client2"
+client2 = setupClient "client1"
+
+stress :: IO ()
+stress = void $ flip mapConcurrently [1..5] $ \i -> do
+    setupClient $ T.pack $ "client" <> show i
 
 setupClient :: Text -> IO ()
 setupClient name = do
     time <- getCurrentTime
-    queue <- newIORef ([] :: [(Message, Socket)])
-    heartbeatRef <- newIORef time
+    queue <- newTQueueIO
+    logQ <- newTQueueIO
+    heartbeatRef <- newTVarIO (time :: UTCTime)
+    putStrLn "setup client"
 
     srvMsg <- socket AF_UNIX (GeneralSocketType 1) 1
-    connect srvMsg (SockAddrUnix "/tmp/container-manager.sock")
+    connect srvMsg (SockAddrUnix "/tmp/container-manager-bouncer.sock")
+    threadDelay second
 
     -- Ask for setup
     sendMessage srvMsg (Setup name)
+    resp <- recvMessage srvMsg
+    close srvMsg
 
-    flip runReaderT (ClientContext heartbeatRef queue) $ do
-      messageHandler
-      liftIO $ heartBeat srvMsg name
-      heartBeatAck
 
-      liftIO $ clientMessageServer srvMsg queue
-      liftIO $ forever $ threadDelay second
+    case (A.decode . BS.fromStrict) <$> resp of
+      Just (Just (MoveToSocket (MoveTo sock))) -> do
+        newSrv <- socket AF_UNIX (GeneralSocketType 1) 1
+        connect newSrv (SockAddrUnix $ T.unpack $ sock)
 
-heartBeat :: Socket -> Text -> IO ()
-heartBeat sock containerName = void $ forkIO $ forever $ do
-    threadDelay second
-    time <- getCurrentTime
-    logContainer Info containerName $ "Sending Heartbeat at " <> (T.pack $ show time)
-    sendMessage sock (HeartBeat time containerName)
+        flip runReaderT (ClientContext heartbeatRef queue logQ) $ do
+          heartBeatAck
+          heartBeat newSrv name
+          liftIO $ clientMessageServer newSrv queue
+          liftIO $ handleLogs logQ
+          messageHandler
+          liftIO $ forever $ threadDelay $ 1000 * second
+        --threadDelay second
+      _ -> pure ()
+
+
+heartBeat :: MonadIO m => Socket -> Text -> ReaderT ClientContext m ()
+heartBeat sock containerName = do
+    logQ <- asks _clientLog
+    liftIO $ void $ forkIO $ forever $ do
+      threadDelay (1 * second)
+      time <- getCurrentTime
+      logContainer logQ Info containerName $ "Sending Heartbeat at " <> (T.pack $ show time)
+      forkIO $ sendMessage sock (HeartBeat time containerName)
 
 heartBeatAck :: MonadIO m => ReaderT ClientContext m ()
 heartBeatAck = do
-    (ClientContext heartbeatRef _) <- ask
+    heartbeatRef <- asks _clientHeartbeatRef
+    logQ <- asks _clientLog
     void $ liftIO $ forkIO $ forever $ do
-      threadDelay second
-      time1 <- readIORef heartbeatRef
+      time1 <- atomically $ readTVar heartbeatRef
       threadDelay (5 * second)
-      time2 <- readIORef heartbeatRef
+      time2 <- atomically $ readTVar heartbeatRef
+      liftIO $ print time1
+      liftIO $ print time2
       when (time1 == time2) $ do
-          logLevel Error "Host Deamon is Dead, Forcing program stop, Goodbye"
-          exit
+          logLevel logQ Error "Host Deamon is Dead, Forcing program stop, Goodbye"
+          --exit
 
 messageHandler :: MonadIO m => ReaderT ClientContext m ()
 messageHandler = do
-   (ClientContext heartbeatAck queue) <- ask
+   (ClientContext heartbeatAck queue logQ) <- ask
    void $ liftIO $ forkIO $ forever $ do
-     res <- atomicModifyIORef queue $ \x -> (drop 1 x, (headMay x))
-     case res of
-       Nothing -> threadDelay 10000
-       Just (msg, _conn) -> case msg of
-          (LinkContainer source _dest) -> do
-              putStrLn source
-          (Acknowledge ACK (HeartBeat time _)) -> do
-              writeIORef heartbeatAck time
-          (UDevEvent action node) -> do
-              putStrLn $ "Node: " <> (T.unpack $ unNode node)
-              putStrLn $ "Action: " <> show action
-
-          a -> logLevel Warning $ prettyName a
+     (msgB, _conn) <- atomically $ readTQueue queue
+     let msg = A.decode $ BS.fromStrict msgB
+     case msg of
+       Just (LinkContainer source _dest) -> do
+           putStrLn source
+       Just (Acknowledge ACK (HeartBeat time _)) -> do
+           logLevel logQ Info $ "Got heartbeat back for " <> (T.pack $ show time)
+           atomically $ writeTVar heartbeatAck time
+       Just Shutdown -> exit
+       Just (UDevEvent action node) -> do
+           logLevel logQ Info $ "Node: " <> unNode node
+           logLevel logQ Info $ "Action: " <> (T.pack $ show action)
+       Just a -> logLevel logQ Warning $ prettyName a
+       Nothing -> pure ()

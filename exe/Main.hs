@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Main where
 
 import ContainerManager.Server
@@ -12,5 +13,8 @@ main = do
       "server" -> server
       "client" -> client
       "client2" -> client2
+      "client3" -> setupClient "client3"
+      "client4" -> setupClient "client4"
+      "stress" -> stress
       "cli" -> cli
       _ -> pure()

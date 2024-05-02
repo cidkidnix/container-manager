@@ -1,21 +1,21 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE RecursiveDo #-}
 module ContainerManager.Shared where
 
 import ContainerManager.Types
 
 import Network.Socket
 import Network.Socket.ByteString
-import Data.Aeson (FromJSON, ToJSON)
-import qualified Data.Aeson as A
 import qualified Data.ByteString as BS
 import qualified Data.Binary as BN
+import Data.Binary (Binary)
 import Data.ByteString (ByteString)
 import Control.Concurrent
 import Control.Monad
 import Control.Exception.Base
-import qualified Control.Exception as E
 import qualified Data.Text as T
 import Data.Text (Text)
 import Data.IORef
@@ -23,75 +23,107 @@ import qualified System.UDev as UDev
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.UTF8 as BLU -- from utf8-strin
+import Control.Concurrent.STM hiding (retry)
+import GHC.IO.Exception
+import qualified Data.Aeson as A
 
-sendMessage :: ToJSON a => Socket -> a -> IO ()
+sendMessage :: A.ToJSON a => Socket -> a -> IO ()
 sendMessage sock msg = do
-    let size = BS.length encodedMsg
-        eSize = BS.toStrict $ BN.encode size
+    let size = MsgSize $ BS.length encodedMsg
+        eSize = BS.toStrict $ A.encode size
     void $ safeSend sock eSize $ do
-      (ack :: Maybe ACK) <- (A.decode . BS.fromStrict) <$> recv sock 1024
-      ackFailed ack
+      (_ :: Maybe ACK) <- (A.decode . BS.fromStrict) <$> recv sock 256
       void $ safeSend sock encodedMsg $ pure ()
     where
-        ackFailed = \case
-            Just ACK -> do
-                pure ()
-            _ -> close sock
         encodedMsg :: ByteString
         encodedMsg = BS.toStrict $ A.encode msg
 
-recvMessage :: FromJSON a => Socket -> IO (Maybe a)
+recvMessage :: Socket -> IO (Maybe ByteString)
 recvMessage sock = do
-    (size'' :: Either IOException ByteString) <- try $ recv sock 256
-    case size'' of
+    size <- recv sock 32
+    let (size' :: Maybe MsgSize) = A.decode $ BS.fromStrict size
+    (r :: Either IOException Int) <- try $ send sock (BS.toStrict $ A.encode ACK)
+    case r of
       Left _ -> do
-          close sock
-          pure Nothing
-      Right size -> do
-        let (size' :: Int) = BN.decode $ BS.fromStrict size
-        (r :: Either IOException Int) <- try $ send sock (BS.toStrict $ A.encode ACK)
-        case r of
-          Left _ -> do
-              close sock
-              pure Nothing
-          Right _ -> do
-            (msg' :: Either IOException ByteString) <- try $ recv sock (size' + 1)
-            case msg' of
-              Left _ -> do
-                  close sock
-                  pure Nothing
-              Right msg -> pure $ A.decode $ BS.fromStrict $ msg
+          throw $ IOError Nothing Interrupted "" "" Nothing Nothing
+      Right _ -> do
+        case size' of
+          Nothing -> pure Nothing
+          Just size -> do
+            msg <- recv sock ((unMsgSize size) * 2)
+            pure $ Just msg
 
-queueMessages :: Socket -> IORef [(Message, Socket)] -> IO ()
+queueMessages :: Socket -> TQueue (ByteString, Socket) -> IO ()
 queueMessages conn queue = do
-    (msg :: Maybe a) <- recvMessage conn
+    (msg :: (Maybe ByteString)) <- recvMessage conn
     case msg of
-      Just Shutdown -> close conn
-      Just a -> do
-        atomicModifyIORef queue $ \x -> ((a, conn):x, ())
-      _ -> close conn
+      (Just a) -> void $ forkIO $ atomically $ do
+          writeTQueue queue (a, conn)
+      Nothing -> do
+          pure ()
 
-clientMessageServer :: Socket -> IORef [(Message, Socket)] -> IO ()
-clientMessageServer sock queue = void $ forkIO $ forever $ queueMessages sock queue
+clientMessageServer :: Socket -> TQueue (ByteString, Socket) -> IO ()
+clientMessageServer sock queue = void $ forkIO $ forever $ do
+    queueMessages sock queue
 
-messageServer :: Socket -> IORef [(Message, Socket)] -> IO ()
-messageServer sock queue = void $ forkIO $ forever $
-    E.bracketOnError (accept sock) (close . fst)
-      $ \(conn, _peer) -> void $ forkOS $ forever $ queueMessages conn queue
+messageServer :: Socket -> TQueue (ByteString, Socket) -> TQueue Message -> IO ()
+messageServer sock queue outboundQ = void $ do
+    (exception :: TQueue ThreadId) <- newTQueueIO
+    void $ forkIO $ forever $ do
+      (a :: Either IOException (Socket, SockAddr)) <- try $ accept sock
+      case a of
+        Left _ -> pure ()
+        Right (conn, peer) -> do
+            outboundQueue conn outboundQ
+            putStrLn $ show peer
+            rec
+              (t :: ThreadId) <- forkOS $ forever $ do
+                (attempt :: Either IOException ()) <- try $ queueMessages conn queue
+                case attempt of
+                    Left err -> do
+                        atomically $ do
+                            writeTQueue exception t
+                    Right _ -> pure ()
+
+            void $ forkIO $ forever $ do
+              thread <- atomically $ readTQueue exception
+              close conn
+              killThread thread
+
 
 safeSend :: Socket -> ByteString -> (IO () -> IO ())
 safeSend sock msg f = do
-    (r :: Either IOException Int) <- try $ send sock msg
+    (r :: Either IOException ()) <- try $ sendAll sock msg
     case r of
-      Left _  -> close sock
+      Left e  -> do
+          print "FUCK"
+          print e
+          pure ()
       Right _ -> f
 
+handleLogs :: TQueue Text -> IO ()
+handleLogs logQ = void $ forkIO $ forever $ do
+    threadDelay second
+    msg <- atomically $ flushTQueue logQ
+    --logLevel logQ Info $ "Length of logs to handle: " <> (T.pack $ show (length msg))
+    mapM_ (putStrLn . T.unpack) msg
 
-logContainer :: LogLevel -> Text -> Text -> IO ()
-logContainer level container msg = putStrLn $ (T.unpack (withColor level ("[" <> prettyName level <> "]"))) <> "[" <> T.unpack container <> "] " <> T.unpack msg
 
-logLevel :: LogLevel -> Text -> IO ()
-logLevel lvl msg = putStrLn $ (T.unpack (withColor lvl ("[" <> prettyName lvl <> "] "))) <> T.unpack msg
+logContainer :: TQueue Text -> LogLevel -> Text -> Text -> IO ()
+logContainer logQ level container msg = do
+    let level' = (withColor level ("[" <> prettyName level <> "]"))
+        container' = ("\x1b[34m" <> "[" <> container <> "] " <> defaultC)
+        full = level' <> container' <> msg
+    atomically $ do
+        writeTQueue logQ full
+
+
+logLevel :: TQueue Text -> LogLevel -> Text -> IO ()
+logLevel logQ lvl msg = do
+    let level' = (withColor lvl ("[" <> prettyName lvl <> "] "))
+        full = level' <> msg
+    atomically $ do
+        writeTQueue logQ full
 
 second :: Int
 second = 1000000
@@ -104,3 +136,16 @@ convertAction = \case
 
 convertNode :: BS.ByteString -> Node
 convertNode = Node . T.pack . BLU.toString . BS.fromStrict
+
+outboundQueue :: Socket -> TQueue Message -> IO ()
+outboundQueue conn queue = void $ forkIO $ forever $ do
+        queue' <- atomically $ flushTQueue queue
+        flip mapM_ queue' $ \msg -> do
+            print queue'
+            threadDelay 1000
+            print msg
+            sendMessage conn msg
+
+sendMessageQ :: TQueue Message -> Message -> IO ()
+sendMessageQ queue msg = do
+    atomically $ writeTQueue queue $ msg

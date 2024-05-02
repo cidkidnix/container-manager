@@ -2,16 +2,18 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module ContainerManager.Types where
 
 import GHC.Generics
 import Network.Socket
-import Data.IORef
 import Data.Map (Map)
 import Data.Set (Set)
-import Data.Aeson hiding (Error)
 import Data.Text (Text)
 import Data.Time
+import Control.Concurrent.STM
+import Data.ByteString (ByteString)
+import Data.Aeson (ToJSON, FromJSON)
 
 -- Forgive me
 foreign import ccall "exit" exit :: IO ()
@@ -22,31 +24,48 @@ class Default a where
 class PrettyName a where
     prettyName :: a -> Text
 
+newtype MsgSize = MsgSize { unMsgSize :: Int }
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON MsgSize
+instance FromJSON MsgSize
+
 data HostContext = HostContext
-    { _hostMountRef :: IORef (Map Text (Set FilePath))
-    , _hostHeartbeatRef :: IORef (Map Text UTCTime)
-    , _hostQueue :: IORef [(Message, Socket)]
+    { _hostMountRef :: TVar (Map Text (Set FilePath))
+    , _hostHeartbeatRef :: TVar (Map Text (Socket, UTCTime))
+    , _hostQueue :: TQueue (ByteString, Socket)
+    , _hostLog :: TQueue Text
+    , _outboundQueue :: TQueue Message
     } deriving (Eq)
 
 data ClientContext = ClientContext
-    { _clientHeartbeatRef :: IORef UTCTime
-    , _clientQueue :: IORef [(Message, Socket)]
+    { _clientHeartbeatRef :: TVar UTCTime
+    , _clientQueue :: TQueue (ByteString, Socket)
+    , _clientLog :: TQueue Text
     } deriving (Eq)
 
-data Message = BindHost FilePath FilePath Text
-             | UnbindHost FilePath Text
-             | LinkContainer FilePath FilePath
-             | RunCommand [Text]
-             | HeartBeat UTCTime Text
-             | Setup Text
-             | Configure Config
-             | Acknowledge ACK Message
-             | UDevEvent Action Node
+
+data Message = BindHost !FilePath !FilePath !Text
+             | UnbindHost !FilePath !Text
+             | LinkContainer !FilePath !FilePath
+             | RunCommand !([Text])
+             | HeartBeat !UTCTime !Text
+             | Setup !Text
+             | Configure !Config
+             | Acknowledge !ACK !Message
              | Shutdown
+             | UDevEvent Action Node
+             | MoveToSocket MoveTo
              deriving (Show, Eq, Ord, Generic)
 
 instance ToJSON Message
 instance FromJSON Message
+
+newtype MoveTo = MoveTo { unMoveTo :: Text }
+  deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON MoveTo
+instance FromJSON MoveTo
 
 newtype Node = Node { unNode :: Text }
   deriving (Show, Eq, Ord, Generic)
@@ -74,14 +93,11 @@ data LogLevel = Error
               | Quiet
         deriving (Show, Eq, Ord, Generic)
 
-instance ToJSON LogLevel
-instance FromJSON LogLevel
-
 data ACK = ACK | NACK
   deriving (Show, Eq, Ord, Generic)
 
-instance ToJSON ACK
 instance FromJSON ACK
+instance ToJSON ACK
 
 instance Default Message where
     def = LinkContainer "/tmp/test" "/srv/tmp/test"
