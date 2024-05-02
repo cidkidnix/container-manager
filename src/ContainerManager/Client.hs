@@ -4,6 +4,7 @@ module ContainerManager.Client where
 
 import ContainerManager.Types
 import ContainerManager.Shared
+import qualified ContainerManager.Mount as Mount
 
 import Network.Socket hiding (Debug)
 import Control.Concurrent
@@ -22,6 +23,8 @@ import Data.Text (Text)
 
 import Control.Concurrent.STM
 import qualified Data.Aeson as A
+import System.Directory
+import System.FilePath
 
 client :: IO ()
 client = setupClient "Steam"
@@ -104,7 +107,14 @@ messageHandler = do
            atomically $ writeTVar heartbeatAck time
        Just Shutdown -> exit
        Just (UDevEvent action node) -> do
-           logLevel logQ Info $ "Node: " <> unNode node
-           logLevel logQ Info $ "Action: " <> (T.pack $ show action)
+           let fileName = takeFileName $ T.unpack $ unNode node
+               hackPath = "/yacc/hidraw_hack"
+           case action of
+             Add -> do
+                Mount.bind (hackPath </> fileName) $ T.unpack $ unNode node
+             Remove -> do
+                exists <- doesPathExist $ T.unpack $ unNode node
+                when exists $ Mount.umount $ T.unpack $ unNode node
+
        Just a -> logLevel logQ Warning $ prettyName a
        Nothing -> pure ()
