@@ -113,7 +113,9 @@ messageHandler = do
                 Mount.bind (hackPath </> fileName) $ T.unpack $ unNode node
              Remove -> do
                 exists <- doesPathExist $ T.unpack $ unNode node
-                when exists $ Mount.umount $ T.unpack $ unNode node
+                when exists $ do
+                    Mount.umount $ T.unpack $ unNode node
+                    removeFile $ T.unpack $ unNode node
 
        Just a -> logLevel logQ Warning $ prettyName a
        Nothing -> pure ()

@@ -134,6 +134,7 @@ server = do
                         exists <- doesPathExist $ hackPath </> fileName
                         when exists $ do
                             Mount.umount $ hackPath </> fileName
+                            removeFile $ hackPath </> fileName
 
                     _ -> pure ()
             liftIO $ forever $ threadDelay 1000000
