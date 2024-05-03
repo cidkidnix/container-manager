@@ -100,9 +100,8 @@ safeSend sock msg f = do
 
 handleLogs :: TQueue Text -> IO ()
 handleLogs logQ = void $ forkIO $ forever $ do
-    threadDelay second
-    msg <- atomically $ flushTQueue logQ
-    mapM_ (putStrLn . T.unpack) msg
+    msg <- atomically $ readTQueue logQ
+    putStrLn $ T.unpack $ msg
 
 
 logContainer :: TQueue Text -> LogLevel -> Text -> Text -> IO ()
@@ -135,10 +134,8 @@ convertNode = Node . T.pack . BLU.toString . BS.fromStrict
 
 outboundQueue :: Socket -> TQueue Message -> IO ()
 outboundQueue conn queue = void $ forkIO $ forever $ do
-        queue' <- atomically $ flushTQueue queue
-        flip mapM_ queue' $ \msg -> do
-            threadDelay 1000
-            sendMessage conn msg
+        msg <- atomically $ readTQueue queue
+        sendMessage conn msg
 
 sendMessageQ :: TQueue Message -> Message -> IO ()
 sendMessageQ queue msg = do

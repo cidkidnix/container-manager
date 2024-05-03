@@ -163,39 +163,28 @@ messageHandler :: MonadIO m => ReaderT HostContext m ()
 messageHandler = do
    (HostContext _ heartbeatRef queue logQ outboundQ) <- ask
    void $ liftIO $ forkIO $ forever $ do
-     threadDelay 1000
-     queue' <- atomically $ flushTQueue queue
-     flip mapM_ queue' $ \(msgB, conn) -> do
-       let (msg :: Maybe Message) = A.decode $ BS.fromStrict msgB
-       case msg of
-          Nothing -> pure ()
-          --putStrLn "Nothing"
-          --pure ()
-          Just (BindHost _path _container _) -> do
-              pure ()
-              {-logContainer Warning container $ "Binding " <> T.pack path
-              let pat' = "/tmp/" <> T.unpack container <> "/" <> path
-              createDirectoryIfMissing True pat'
-              Mount.bind path pat'-}
-          Just (UnbindHost path container) -> do
-              logContainer logQ Info container $ "Unbinding " <> T.pack path <> " from container " <> container
-              --Mount.umount ("/tmp/" <> T.unpack container <> "/" <> "test")
-          Just (HeartBeat beat client) -> do
-              r <- atomically $ readTVar heartbeatRef
-              let exists = Map.lookup client r
-                  r' = case exists of
-                    Just _ -> Map.update (\_ -> Just (conn, beat)) client r
-                    Nothing -> Map.insert client (conn, beat) r
-              atomically $ writeTVar heartbeatRef r'
-              logContainer logQ Info client ("Recieved HeartBeat: " <> (T.pack $ show beat))
-              sendMessageQ outboundQ (Acknowledge ACK (HeartBeat beat client))
-              logContainer logQ Info client "Sending Heartbeat Acknowledgement"
+     (msgB, conn) <- atomically $ readTQueue queue
+     let (msg :: Maybe Message) = A.decode $ BS.fromStrict msgB
+     case msg of
+        Nothing -> pure ()
+        Just (BindHost _path _container _) -> do
+            pure ()
+        Just (UnbindHost path container) -> do
+            logContainer logQ Info container $ "Unbinding " <> T.pack path <> " from container " <> container
+        Just (HeartBeat beat client) -> do
+            r <- atomically $ readTVar heartbeatRef
+            let exists = Map.lookup client r
+                r' = case exists of
+                  Just _ -> Map.update (\_ -> Just (conn, beat)) client r
+                  Nothing -> Map.insert client (conn, beat) r
+            atomically $ writeTVar heartbeatRef r'
+            logContainer logQ Info client ("Recieved HeartBeat: " <> (T.pack $ show beat))
+            sendMessageQ outboundQ (Acknowledge ACK (HeartBeat beat client))
+            logContainer logQ Info client "Sending Heartbeat Acknowledgement"
 
-          Just (Setup container) -> do
-              logContainer logQ Info container "Requested Setup!"
-              -- Run Client specific Daemons, such as udev events
-              sendMessageQ outboundQ (Configure def)
-          -- We don't respond to these requests
-          Just a -> do
-              logLevel logQ Warning $ "NACKing " <> prettyName a
-              sendMessageQ outboundQ (Acknowledge NACK a)
+        Just (Setup container) -> do
+            logContainer logQ Info container "Requested Setup!"
+            sendMessageQ outboundQ (Configure def)
+        Just a -> do
+            logLevel logQ Warning $ "NACKing " <> prettyName a
+            sendMessageQ outboundQ (Acknowledge NACK a)
