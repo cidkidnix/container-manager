@@ -120,7 +120,6 @@ server = do
                     udevEventStarter broadcast
                 udevChan <- atomically $ dupTChan broadcast
                 forever $ do
-                  threadDelay second
                   message <- atomically $ readTChan udevChan
                   sendMessageQ outboundQ message
                   case message of
