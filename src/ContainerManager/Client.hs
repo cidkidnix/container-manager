@@ -53,7 +53,6 @@ setupClient name = do
     resp <- recvMessage srvMsg
     close srvMsg
 
-
     case (A.decode . BS.fromStrict) <$> resp of
       Just (Just (MoveToSocket (MoveTo sock))) -> do
         newSrv <- socket AF_UNIX (GeneralSocketType 1) 1
@@ -99,12 +98,18 @@ messageHandler = do
      (msgB, _conn) <- atomically $ readTQueue queue
      let msg = A.decode $ BS.fromStrict msgB
      case msg of
-       Just (LinkContainer source _dest) -> do
-           putStrLn source
        Just (Acknowledge ACK (HeartBeat time _)) -> do
            logLevel logQ Info $ "Got heartbeat back for " <> (T.pack $ show time)
            atomically $ writeTVar heartbeatAck time
        Just Shutdown -> exit
+       Just (FileEvent _ event) -> do
+           let path = "/yacc" </> "binds"
+           case event of
+             Bind fp -> do
+                 Mount.bind (path </> fp) fp
+             BindDiffPath  _ _ -> pure ()
+             Unbind fp -> do
+                 Mount.umount fp
        Just (UDevEvent action node) -> do
            let fileName = takeFileName $ T.unpack $ unNode node
                hackPath = "/yacc/udev"

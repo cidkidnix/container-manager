@@ -75,7 +75,6 @@ messageServer sock queue outboundQ = void $ do
         Left _ -> pure ()
         Right (conn, peer) -> do
             outboundQueue conn outboundQ
-            putStrLn $ show peer
             rec
               (t :: ThreadId) <- forkOS $ forever $ do
                 (attempt :: Either IOException ()) <- try $ queueMessages conn queue

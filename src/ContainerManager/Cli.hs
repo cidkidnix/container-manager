@@ -12,11 +12,7 @@ import Network.Socket
 cli :: IO ()
 cli = do
     containerConnect <- socket AF_UNIX (GeneralSocketType 1) 1
-    connect containerConnect (SockAddrUnix "/tmp/container-manager.sock")
-    sendMessage containerConnect (BindHost "/home/cidkid/test" "client2" "")
+    connect containerConnect (SockAddrUnix "/tmp/container-manager-cli.sock")
+    sendMessage containerConnect (FileEvent (Container "Steam") (Bind "/home/cidkid/test"))
     close containerConnect
-    threadDelay (2 * second)
-    containerConnect <- socket AF_UNIX (GeneralSocketType 1) 1
-    connect containerConnect (SockAddrUnix "/tmp/container-manager.sock")
-    sendMessage containerConnect (UnbindHost "/home/cidkid/test" "client2")
 

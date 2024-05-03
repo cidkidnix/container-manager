@@ -82,21 +82,68 @@ udevWatcher conn = withUDev $ \interface -> do
             atomically $ writeTChan conn $ UDevEvent (convertAction action') (convertNode node')
         _ -> pure ()
 
+serveUDevEvent :: Text -> TQueue Message -> TChan Message -> IO ()
+serveUDevEvent container outboundQ udevChan = forever $ do
+  message <- atomically $ readTChan udevChan
+  case message of
+    UDevEvent Add node -> do
+      let fileName = takeFileName $ T.unpack $ unNode node
+          hackPath = "/yacc" </> T.unpack container </> "udev"
+      createDirectoryIfMissing True hackPath
+      Mount.bind (T.unpack $ unNode node) $ hackPath </> fileName
+    UDevEvent Remove node -> do
+        let fileName = takeFileName $ T.unpack $ unNode node
+            hackPath = "/yacc" </> T.unpack container </> "udev"
+        exists <- doesPathExist $ hackPath </> fileName
+        when exists $ do
+            Mount.umount $ hackPath </> fileName
+            removeFile $ hackPath </> fileName
+    _ -> pure ()
+  sendMessageQ outboundQ message
+
 initializeSocket :: Text -> IO Socket
 initializeSocket moveToLOC = do
     containerConnect <- socket AF_UNIX (Stream) 1
     withFdSocket containerConnect setCloseOnExecIfNeeded
     bind containerConnect (SockAddrUnix $ T.unpack moveToLOC)
-    listen containerConnect 5
+    listen containerConnect 10
     pure containerConnect
 
 server :: IO ()
 server = do
     containerConnect <- initializeSocket "/tmp/container-manager-bouncer.sock"
+    cliConnect <- initializeSocket "/tmp/container-manager-cli.sock"
     logQ <- newTQueueIO
+    (track :: TVar (Map Text (TQueue Message))) <- newTVarIO mempty
     broadcast <- newBroadcastTChanIO
     forkIO $ handleLogs logQ
     forkIO $ udevWatcher broadcast
+    forkIO $ do
+        queue <- newTQueueIO
+        outboundQ <- newTQueueIO
+        heartbeatQ <- newTVarIO =<< getCurrentTime
+        print "hI"
+        liftIO $ messageServer cliConnect queue outboundQ
+        liftIO $ forkIO $ forever $ do
+          (msgB, conn) <- atomically $ readTQueue queue
+          print "After Queue"
+          let (msg :: Maybe Message) = A.decode $ BS.fromStrict msgB
+          print msgB
+          case msg of
+            Just (FileEvent (Container container) event) -> do
+                val <- atomically $ readTVar track
+                let containerExists = Map.lookup container val
+                case containerExists of
+                  Just containerQueue -> do
+                      logLevel logQ Info $ "Forwarding File Event into the server queue"
+                      messageLogic heartbeatQ containerQueue logQ msg
+                      print container
+                      print event
+                  Nothing -> do
+                      logLevel logQ Info "Container does not exist!"
+
+            _ -> print "error"
+        forever $ threadDelay (second * 100)
     forever $ do
       logLevel logQ Info "Got Data from socket"
       (sock', _peer) <- accept containerConnect
@@ -106,7 +153,8 @@ server = do
           putStrLn $ "Okay Setting up conatiner " <> T.unpack container
           newSocket <- initializeSocket $ T.pack $ "/yacc" </> T.unpack container </> "container-manager.sock"
           sendMessage sock' $ MoveToSocket $ MoveTo $ T.pack $ "/yacc" </> "container-manager.sock"
-          heartbeat' <- newTVarIO (mempty :: Map Text (Socket, UTCTime))
+          currentTime <- getCurrentTime
+          heartbeat' <- newTVarIO currentTime
           queue <- newTQueueIO
           mounts <- newTVarIO (mempty :: Map Text (Set FilePath))
           outboundQ <- newTQueueIO
@@ -115,28 +163,14 @@ server = do
             liftIO $ messageServer newSocket queue outboundQ
             heartbeat
             liftIO $ forkIO $ do
+                prevVal <- atomically $ readTVar track
+                atomically $ writeTVar track $ Map.insert container outboundQ prevVal
+            liftIO $ forkIO $ do
                 forkIO $ do
                     threadDelay (3 * second)
                     udevEventStarter broadcast
                 udevChan <- atomically $ dupTChan broadcast
-                forever $ do
-                  message <- atomically $ readTChan udevChan
-                  sendMessageQ outboundQ message
-                  case message of
-                    UDevEvent Add node -> do
-                      let fileName = takeFileName $ T.unpack $ unNode node
-                          hackPath = "/yacc" </> T.unpack container </> "udev"
-                      createDirectoryIfMissing True hackPath
-                      Mount.bind (T.unpack $ unNode node) $ hackPath </> fileName
-                    UDevEvent Remove node -> do
-                        let fileName = takeFileName $ T.unpack $ unNode node
-                            hackPath = "/yacc" </> T.unpack container </> "udev"
-                        exists <- doesPathExist $ hackPath </> fileName
-                        when exists $ do
-                            Mount.umount $ hackPath </> fileName
-                            removeFile $ hackPath </> fileName
-
-                    _ -> pure ()
+                serveUDevEvent container outboundQ udevChan
             liftIO $ forever $ threadDelay 1000000
         _ -> pure ()
 
@@ -148,15 +182,9 @@ heartbeat = do
      time1 <- atomically $ readTVar heartbeatRef
      threadDelay (5 * second)
      time2 <- atomically $ readTVar heartbeatRef
-
-     let clients = Map.intersectionWith (\(_, client1) -> \(sock, client') -> (sock, client1 == client')) time1 time2
-     forkIO $ void $ flip mapConcurrently (Map.toList clients) $ \(client, (_sock, y)) -> do
-         when y $ do
-             atomically $ do
-                 current <- readTVar heartbeatRef
-                 let fixedMap = Map.delete client current
-                 writeTVar heartbeatRef fixedMap
-             logContainer logQ Error client "Container Has Died"
+     case time1 == time2 of
+       True -> print "Container died"
+       False -> pure ()
 
 messageHandler :: MonadIO m => ReaderT HostContext m ()
 messageHandler = do
@@ -164,26 +192,36 @@ messageHandler = do
    void $ liftIO $ forkIO $ forever $ do
      (msgB, conn) <- atomically $ readTQueue queue
      let (msg :: Maybe Message) = A.decode $ BS.fromStrict msgB
-     case msg of
-        Nothing -> pure ()
-        Just (BindHost _path _container _) -> do
-            pure ()
-        Just (UnbindHost path container) -> do
-            logContainer logQ Info container $ "Unbinding " <> T.pack path <> " from container " <> container
-        Just (HeartBeat beat client) -> do
-            r <- atomically $ readTVar heartbeatRef
-            let exists = Map.lookup client r
-                r' = case exists of
-                  Just _ -> Map.update (\_ -> Just (conn, beat)) client r
-                  Nothing -> Map.insert client (conn, beat) r
-            atomically $ writeTVar heartbeatRef r'
-            logContainer logQ Info client ("Recieved HeartBeat: " <> (T.pack $ show beat))
-            sendMessageQ outboundQ (Acknowledge ACK (HeartBeat beat client))
-            logContainer logQ Info client "Sending Heartbeat Acknowledgement"
+     messageLogic heartbeatRef outboundQ logQ msg
 
-        Just (Setup container) -> do
-            logContainer logQ Info container "Requested Setup!"
-            sendMessageQ outboundQ (Configure def)
-        Just a -> do
-            logLevel logQ Warning $ "NACKing " <> prettyName a
-            sendMessageQ outboundQ (Acknowledge NACK a)
+messageLogic :: TVar UTCTime -> TQueue Message -> TQueue Text -> Maybe Message -> IO ()
+messageLogic heartbeatRef outboundQ logQ msg = case msg of
+  Nothing -> pure ()
+  Just (FileEvent (Container container) event) -> do
+      print "Got File Event!"
+      let containerPath = "/yacc" </> T.unpack container </> "binds"
+      createDirectoryIfMissing True containerPath
+      case event of
+        Bind fp -> do
+            let name = takeFileName fp
+            print $ containerPath </> name
+            Mount.bind fp $ containerPath </> name
+            sendMessageQ outboundQ $ FileEvent (Container container) $ Bind $ "/yacc" </> "binds" </> name
+        BindDiffPath fp containerFP -> logContainer logQ Info container "Not Implemented!"
+        Unbind fp -> do
+            sendMessageQ outboundQ $ FileEvent (Container container) $ Unbind $ "/yacc" </> "binds" </> fp
+            Mount.umount $ containerPath </> fp
+
+  Just (HeartBeat beat client) -> do
+      r <- atomically $ readTVar heartbeatRef
+      atomically $ writeTVar heartbeatRef beat
+      logContainer logQ Info client ("Recieved HeartBeat: " <> (T.pack $ show beat))
+      sendMessageQ outboundQ (Acknowledge ACK (HeartBeat beat client))
+      logContainer logQ Info client "Sending Heartbeat Acknowledgement"
+
+  Just (Setup container) -> do
+      logContainer logQ Info container "Requested Setup!"
+      sendMessageQ outboundQ (Configure def)
+  Just a -> do
+      logLevel logQ Warning $ "Rejecting " <> prettyName a
+      sendMessageQ outboundQ (Acknowledge NACK a)

@@ -30,9 +30,16 @@ newtype MsgSize = MsgSize { unMsgSize :: Int }
 instance ToJSON MsgSize
 instance FromJSON MsgSize
 
+data FileType = Folder
+              | File
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON FileType
+instance FromJSON FileType
+
 data HostContext = HostContext
     { _hostMountRef :: TVar (Map Text (Set FilePath))
-    , _hostHeartbeatRef :: TVar (Map Text (Socket, UTCTime))
+    , _hostHeartbeatRef :: TVar UTCTime
     , _hostQueue :: TQueue (ByteString, Socket)
     , _hostLog :: TQueue Text
     , _outboundQueue :: TQueue Message
@@ -45,9 +52,7 @@ data ClientContext = ClientContext
     } deriving (Eq)
 
 
-data Message = BindHost !FilePath !FilePath !Text
-             | UnbindHost !FilePath !Text
-             | LinkContainer !FilePath !FilePath
+data Message = FileEvent Container EventFile
              | RunCommand !([Text])
              | HeartBeat !UTCTime !Text
              | Setup !Text
@@ -60,6 +65,20 @@ data Message = BindHost !FilePath !FilePath !Text
 
 instance ToJSON Message
 instance FromJSON Message
+
+newtype Container = Container { unContainer :: Text }
+  deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON Container
+instance FromJSON Container
+
+data EventFile = Bind FilePath
+               | BindDiffPath FilePath FilePath
+               | Unbind FilePath
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON EventFile
+instance FromJSON EventFile
 
 newtype MoveTo = MoveTo { unMoveTo :: Text }
   deriving (Show, Eq, Ord, Generic)
@@ -99,17 +118,11 @@ data ACK = ACK | NACK
 instance FromJSON ACK
 instance ToJSON ACK
 
-instance Default Message where
-    def = LinkContainer "/tmp/test" "/srv/tmp/test"
-
 instance Default Config where
     def = Config "/tmp/test.sock"
 
 instance PrettyName Message where
     prettyName = \case
-      BindHost _ _ _ -> "BindHost"
-      UnbindHost _ _ -> "UnbindHost"
-      LinkContainer _ _ -> "LinkContainer"
       RunCommand _ -> "RunCommand"
       HeartBeat _ _ -> "HeartBeat"
       Setup _ -> "Setup"
