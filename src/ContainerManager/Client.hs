@@ -121,12 +121,14 @@ messageHandler = do
                    False -> case Set.member to mount of
                       True -> pure ()
                       False -> do
-                         let name = joinPath $ filter (\x -> x /= "/") $ splitPath to
+                         let name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
                              newSet = Set.insert to mount
                              directory = takeDirectory $ name
                          atomically $ writeTVar mounts newSet
                          createDirectoryIfMissing True directory
-                         Mount.bind (path </> fp) $ name
+                         print $ path </> name
+                         print to
+                         Mount.bind (path </> name) $ to
 
              UnbindABS fp -> do
                  case Set.member fp mount of
