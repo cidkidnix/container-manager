@@ -218,11 +218,13 @@ server = do
                   Created _ filePath' -> do
                     let fullDir = dir </> (BLU.toString $ BS.fromStrict filePath')
                         event' = Just $ FileEvent (Container container) $ bindEventType $ fullDir
+                    threadDelay second
                     messageLogic mounts heartbeat' outboundQ logQ event'
                     print "created"
                   Deleted _ filePath' -> do
                     let fullDir = dir </> (BLU.toString $ BS.fromStrict filePath')
                         event' = Just $ FileEvent (Container container) $ unbindEventType $ fullDir
+                    threadDelay second
                     messageLogic mounts heartbeat' outboundQ logQ event'
                     print "deleted"
                   Modified _ (Just filePath') -> do
