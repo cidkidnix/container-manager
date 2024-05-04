@@ -338,17 +338,19 @@ messageLogic mounts heartbeatRef outboundQ logQ msg = case msg of
                 modifiedMap = Map.insert container newMounts mount
             print modifiedMap
             case Set.member fp containerMounts of
-              False -> logLevel logQ Info "Refusing to unmount, not mounted"
+              False -> logLevel logQ Info "UNBINDABS: Refusing to unmount, not mounted"
               _ -> do
                   let name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
                   mounted <- Mount.alreadyMounted $ containerPath </> name
                   case mounted of
                     True -> do
                       sendMessageQ outboundQ $ FileEvent (Container container) $ UnbindABS fp
+                      print "UNBINDABS: sent message"
                       Mount.umount $ containerPath </> name
                       atomically $ writeTVar mounts modifiedMap
                     False -> do
                       sendMessageQ outboundQ $ FileEvent (Container container) $ UnbindABS fp
+                      print "UNBINDABS: sent message"
                       atomically $ writeTVar mounts modifiedMap
 
         BindDiffPath fp to -> do

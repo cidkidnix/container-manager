@@ -134,6 +134,7 @@ messageHandler = do
                          Mount.bind (path </> name) $ to
 
              UnbindABS fp -> do
+                 print "UNBINDABS"
                  case Set.member fp mount of
                    False -> logLevel logQ Info "Refusing to unmount, not mounted"
                    True -> do
