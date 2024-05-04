@@ -113,7 +113,7 @@ data ContainerConfig = ContainerConfig
   { _filter_udev_events :: Bool
   , _inotify_watch :: Maybe (Map FilePath BindType)
   , _udev_filters :: Maybe [String]
-  , _automount :: Maybe [String]
+  , _automount :: Maybe (Map FilePath BindType)
   } deriving (Show, Eq, Ord, Generic)
 
 instance ToJSON ContainerConfig

@@ -116,6 +116,7 @@ messageHandler = do
                  mounted <- Mount.alreadyMounted to
                  case mounted of
                    True -> do
+                       print "Already mounted!"
                        let newSet = Set.insert to mount
                        atomically $ writeTVar mounts newSet
                    False -> case Set.member to mount of

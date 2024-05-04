@@ -242,13 +242,16 @@ server = do
                     automount = _automount <$> (Map.lookup container configMap)
                     automount' = case automount of
                                     Just (Just mounts') -> mounts'
-                                    _ -> []
+                                    _ -> mempty
                 void $ forkIO $ do
                     threadDelay $ 5 * second
-                    flip mapM_ automount' $ \path -> do
+                    flip mapM_ (Map.toList automount') $ \(path, btype) -> do
+                        let bindEventType = case btype of
+                                        Absolute -> BindDiffPath path
+                                        Host -> Bind
                         logLevel logQ Info $ "Mounting path: " <> T.pack path
                         messageLogic mounts heartbeat' outboundQ logQ $
-                          Just $ FileEvent (Container container) $ Bind $ path
+                          Just $ FileEvent (Container container) $ bindEventType $ path
                 when runUdev $ do
                   logLevel logQ Info $ "Starting Udev listener"
                   void $ forkIO $ do
