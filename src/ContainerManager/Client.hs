@@ -10,6 +10,8 @@ import Network.Socket hiding (Debug)
 import Control.Concurrent
 import Control.Monad
 
+import qualified Data.Set as Set
+
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Reader
 
@@ -38,10 +40,10 @@ stress = void $ flip mapConcurrently [1..5] $ \i -> do
 
 setupClient :: Text -> IO ()
 setupClient name = do
-    time <- getCurrentTime
     queue <- newTQueueIO
     logQ <- newTQueueIO
-    heartbeatRef <- newTVarIO (time :: UTCTime)
+    clientMounts <- newTVarIO mempty
+    heartbeatRef <- newTVarIO =<< getCurrentTime
     putStrLn "setup client"
 
     srvMsg <- socket AF_UNIX (GeneralSocketType 1) 1
@@ -58,7 +60,7 @@ setupClient name = do
         newSrv <- socket AF_UNIX (GeneralSocketType 1) 1
         connect newSrv (SockAddrUnix $ T.unpack $ sock)
 
-        flip runReaderT (ClientContext heartbeatRef queue logQ) $ do
+        flip runReaderT (ClientContext heartbeatRef queue logQ clientMounts) $ do
           heartBeatAck
           heartBeat newSrv name
           liftIO $ clientMessageServer newSrv queue
@@ -93,7 +95,7 @@ heartBeatAck = do
 
 messageHandler :: MonadIO m => ReaderT ClientContext m ()
 messageHandler = do
-   (ClientContext heartbeatAck queue logQ) <- ask
+   (ClientContext heartbeatAck queue logQ mounts) <- ask
    void $ liftIO $ forkIO $ forever $ do
      (msgB, _conn) <- atomically $ readTQueue queue
      let msg = A.decode $ BS.fromStrict msgB
@@ -104,14 +106,30 @@ messageHandler = do
        Just Shutdown -> exit
        Just (FileEvent _ event) -> do
            let path = "/yacc" </> "binds"
+           mount <- atomically $ readTVar mounts
            case event of
              Bind fp -> do
-                 let name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
-                 Mount.bind (path </> fp) $ "/host" </> name
+                 mounted <- Mount.alreadyMounted fp
+                 case mounted of
+                   True -> do
+                       let newSet = Set.insert fp mount
+                       atomically $ writeTVar mounts newSet
+                   False -> case Set.member fp mount of
+                       True -> logLevel logQ Info "Refusing to mount, already mounted!"
+                       False -> do
+                         let name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
+                             newSet = Set.insert fp mount
+                         atomically $ writeTVar mounts newSet
+                         Mount.bind (path </> fp) $ "/host" </> name
              BindDiffPath  _ _ -> pure ()
              Unbind fp -> do
-                 let name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
-                 Mount.umount $ "/host" </> name
+                 case Set.member fp mount of
+                   False -> logLevel logQ Info "Refusing to unmount, not mounted"
+                   True -> do
+                     let name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
+                         newSet = Set.delete fp mount
+                     atomically $ writeTVar mounts newSet
+                     Mount.umount $ "/host" </> name
        Just (UDevEvent action node) -> do
            let fileName = takeFileName $ T.unpack $ unNode node
                hackPath = "/yacc/udev"

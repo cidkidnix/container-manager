@@ -49,6 +49,7 @@ data ClientContext = ClientContext
     { _clientHeartbeatRef :: TVar UTCTime
     , _clientQueue :: TQueue (ByteString, Socket)
     , _clientLog :: TQueue Text
+    , _clientMounts :: TVar (Set FilePath)
     } deriving (Eq)
 
 

@@ -95,7 +95,8 @@ serveUDevEvent container mounts outboundQ udevChan = forever $ do
       let fileName = takeFileName $ T.unpack $ unNode node
           hackPath = "/yacc" </> T.unpack container </> "udev"
       createDirectoryIfMissing True hackPath
-      mounted <- Mount.alreadyMounted $ T.unpack $ unNode node
+      mounted <- Mount.alreadyMounted $ hackPath </> (takeFileName $ T.unpack $ unNode node)
+      print mounted
       case mounted of
         True -> do
           let newSet = Set.insert (T.unpack $ unNode node) containerMounts
@@ -242,11 +243,14 @@ messageLogic mounts heartbeatRef outboundQ logQ msg = case msg of
             let newMounts = Set.delete fp containerMounts
                 modifiedMap = Map.insert container newMounts mount
             print modifiedMap
-            let name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
-            print $ containerPath </> name
-            sendMessageQ outboundQ $ FileEvent (Container container) $ Unbind name
-            Mount.umount $ containerPath </> name
-            atomically $ writeTVar mounts modifiedMap
+            case Set.member fp containerMounts of
+              False -> logLevel logQ Info "Refusing to unmount, not mounted"
+              _ -> do
+                let name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
+                print $ containerPath </> name
+                sendMessageQ outboundQ $ FileEvent (Container container) $ Unbind name
+                Mount.umount $ containerPath </> name
+                atomically $ writeTVar mounts modifiedMap
         _ -> logContainer logQ Info container "Not Implemented!"
 
   Just (HeartBeat beat client) -> do
