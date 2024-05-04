@@ -113,6 +113,9 @@ serveUDevEvent container mounts outboundQ udevChan = forever $ do
         when exists $ do
             Mount.umount $ hackPath </> fileName
             removeFile $ hackPath </> fileName
+        let newSet = Set.delete (T.unpack $ unNode node) containerMounts
+            newMap = Map.insert container newSet mount
+        atomically $ writeTVar mounts newMap
     _ -> pure ()
   sendMessageQ outboundQ message
 
