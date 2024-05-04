@@ -137,9 +137,11 @@ messageHandler = do
                  case Set.member fp mount of
                    False -> logLevel logQ Info "Refusing to unmount, not mounted"
                    True -> do
+                       print mount
                        let newSet = Set.delete fp mount
-                       atomically $ writeTVar mounts newSet
+                       print newSet
                        Mount.umount fp
+                       atomically $ writeTVar mounts newSet
              Unbind fp -> do
                  case Set.member fp mount of
                    False -> logLevel logQ Info "Refusing to unmount, not mounted"
