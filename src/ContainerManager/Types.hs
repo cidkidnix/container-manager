@@ -77,6 +77,7 @@ instance FromJSON Container
 data EventFile = Bind FilePath
                | BindDiffPath FilePath FilePath
                | Unbind FilePath
+               | UnbindABS FilePath
     deriving (Show, Eq, Ord, Generic)
 
 instance ToJSON EventFile
@@ -101,9 +102,16 @@ data Action = Remove
 instance ToJSON Action
 instance FromJSON Action
 
+data BindType = Absolute
+              | Host
+        deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON BindType
+instance FromJSON BindType
+
 data ContainerConfig = ContainerConfig
   { _filter_udev_events :: Bool
-  , _inotify_watch :: Maybe [String]
+  , _inotify_watch :: Maybe (Map FilePath BindType)
   , _udev_filters :: Maybe [String]
   , _automount :: Maybe [String]
   } deriving (Show, Eq, Ord, Generic)
@@ -150,6 +158,8 @@ instance PrettyName Message where
       Setup _ -> "Setup"
       Configure _ -> "Configuration"
       UDevEvent _ _ -> "UDevEvent"
+      FileEvent _ _ -> "FileEvent"
+      MoveToSocket _ -> "MoveToSocket"
       Acknowledge a msg -> case a of
         ACK -> "ACK " <> prettyName msg
         NACK -> "NACK " <> prettyName msg

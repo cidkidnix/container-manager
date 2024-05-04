@@ -1,4 +1,3 @@
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
 module ContainerManager.Client where
 
@@ -18,7 +17,6 @@ import Control.Monad.Trans.Reader
 
 import qualified Data.ByteString as BS
 
-import Control.Concurrent.Async
 import Data.Time
 import qualified Data.Text as T
 import Data.Text (Text)
@@ -27,16 +25,6 @@ import Control.Concurrent.STM
 import qualified Data.Aeson as A
 import System.Directory
 import System.FilePath
-
-client :: IO ()
-client = setupClient "Steam"
-
-client2 :: IO ()
-client2 = setupClient "client1"
-
-stress :: IO ()
-stress = void $ flip mapConcurrently [1..5] $ \i -> do
-    setupClient $ T.pack $ "client" <> show i
 
 setupClient :: Text -> IO ()
 setupClient name = do
@@ -124,7 +112,29 @@ messageHandler = do
                          createDirectoryIfMissing True directory
                          print $ "/host" </> directory
                          Mount.bind (path </> fp) $ "/host" </> name
-             BindDiffPath  _ _ -> pure ()
+             BindDiffPath fp to -> do
+                 mounted <- Mount.alreadyMounted to
+                 case mounted of
+                   True -> do
+                       let newSet = Set.insert to mount
+                       atomically $ writeTVar mounts newSet
+                   False -> case Set.member to mount of
+                      True -> pure ()
+                      False -> do
+                         let name = joinPath $ filter (\x -> x /= "/") $ splitPath to
+                             newSet = Set.insert to mount
+                             directory = takeDirectory $ name
+                         atomically $ writeTVar mounts newSet
+                         createDirectoryIfMissing True directory
+                         Mount.bind (path </> fp) $ name
+
+             UnbindABS fp -> do
+                 case Set.member fp mount of
+                   False -> logLevel logQ Info "Refusing to unmount, not mounted"
+                   True -> do
+                       let newSet = Set.delete fp mount
+                       atomically $ writeTVar mounts newSet
+                       Mount.umount fp
              Unbind fp -> do
                  case Set.member fp mount of
                    False -> logLevel logQ Info "Refusing to unmount, not mounted"

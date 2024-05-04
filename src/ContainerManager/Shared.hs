@@ -10,7 +10,6 @@ import ContainerManager.Types
 import Network.Socket
 import Network.Socket.ByteString
 import qualified Data.ByteString as BS
-import qualified Data.Binary as BN
 import Data.Binary (Binary)
 import Data.ByteString (ByteString)
 import Control.Concurrent
@@ -18,10 +17,7 @@ import Control.Monad
 import Control.Exception.Base
 import qualified Data.Text as T
 import Data.Text (Text)
-import Data.IORef
 import qualified System.UDev as UDev
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.UTF8 as BLU -- from utf8-strin
 import Control.Concurrent.STM hiding (retry)
 import GHC.IO.Exception
@@ -49,8 +45,8 @@ recvMessage sock = do
       Right _ -> do
         case size' of
           Nothing -> pure Nothing
-          Just size -> do
-            msg <- recv sock ((unMsgSize size) * 2)
+          Just sizeF -> do
+            msg <- recv sock ((unMsgSize sizeF) * 2)
             pure $ Just msg
 
 queueMessages :: Socket -> TQueue (ByteString, Socket) -> IO ()
@@ -73,13 +69,13 @@ messageServer sock queue outboundQ = void $ do
       (a :: Either IOException (Socket, SockAddr)) <- try $ accept sock
       case a of
         Left _ -> pure ()
-        Right (conn, peer) -> do
+        Right (conn, _peer) -> do
             outboundQueue conn outboundQ
             rec
               (t :: ThreadId) <- forkOS $ forever $ do
                 (attempt :: Either IOException ()) <- try $ queueMessages conn queue
                 case attempt of
-                    Left err -> do
+                    Left _ -> do
                         atomically $ do
                             writeTQueue exception t
                     Right _ -> pure ()
@@ -94,7 +90,7 @@ safeSend :: Socket -> ByteString -> (IO () -> IO ())
 safeSend sock msg f = do
     (r :: Either IOException ()) <- try $ sendAll sock msg
     case r of
-      Left e  -> pure ()
+      Left _  -> pure ()
       Right _ -> f
 
 handleLogs :: TQueue Text -> IO ()

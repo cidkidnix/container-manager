@@ -21,27 +21,20 @@ import Control.Monad.IO.Class
 import Control.Monad.Trans.Reader
 import System.UDev hiding (Action, Add, Remove)
 import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.UTF8 as BLU
 import Control.Concurrent.STM
-import qualified Data.ByteString as BS
-import qualified Data.Binary as BN
-import Control.Exception
 import qualified Data.Aeson as A
 import Data.Maybe
 
-import Control.Concurrent.Async
-import qualified System.Posix.Types as POSIX
-import qualified System.Posix.Files as POSIX
 import System.FilePath
 import System.Directory
 import System.INotify
 
-inotifyWatcher :: [String] -> (String -> (Event -> IO ())) -> IO ()
+inotifyWatcher :: [(String, BindType)] -> ((String, BindType) -> (Event -> IO ())) -> IO ()
 inotifyWatcher directories cb = do
   inotify <- initINotify
-  flip mapM_ directories $ \dir -> forkIO $ do
-    void $ addWatch inotify [Delete, Modify, Create] (BS.toStrict $ BLU.fromString dir) (cb dir)
+  flip mapM_ directories $ \(dir, bindType) -> forkIO $ do
+    void $ addWatch inotify [Delete, Modify, Create] (BS.toStrict $ BLU.fromString dir) (cb (dir, bindType))
   forever $ threadDelay $ second * 100
 
 udevEventStarter :: [String] -> TChan (Message, Text) -> IO ()
@@ -100,7 +93,7 @@ serveUDevEvent allowed container mounts outboundQ udevChan = forever $ do
   mount <- atomically $ readTVar mounts
   let containerMounts' = Map.lookup container mount
       containerMounts = case containerMounts' of
-        Just mount -> mount
+        Just mounts' -> mounts'
         Nothing -> Set.empty
   case message of
     (UDevEvent Add node, subsystem) -> do
@@ -162,17 +155,15 @@ server = do
     mounts <- newTVarIO (mempty :: Map Text (Set FilePath))
     (track :: TVar (Map Text (TQueue Message))) <- newTVarIO mempty
     broadcast <- newBroadcastTChanIO
-    forkIO $ handleLogs logQ
-    forkIO $ udevWatcher allSubSystems broadcast
-    forkIO $ do
+    void $ forkIO $ handleLogs logQ
+    void $ forkIO $ udevWatcher allSubSystems broadcast
+    void $ forkIO $ do
         queue <- newTQueueIO
         outboundQ <- newTQueueIO
         heartbeatQ <- newTVarIO =<< getCurrentTime
-        print "hI"
         liftIO $ messageServer cliConnect queue outboundQ
-        liftIO $ forkIO $ forever $ do
-          (msgB, conn) <- atomically $ readTQueue queue
-          print "After Queue"
+        liftIO $ void $ forkIO $ forever $ do
+          (msgB, _) <- atomically $ readTQueue queue
           let (msg :: Maybe Message) = A.decode $ BS.fromStrict msgB
           print msgB
           case msg of
@@ -188,7 +179,7 @@ server = do
                   Nothing -> do
                       logLevel logQ Info "Container does not exist!"
 
-            _ -> print "error"
+            _ -> pure ()
         forever $ threadDelay (second * 100)
     forever $ do
       logLevel logQ Info "Got Data from socket"
@@ -207,50 +198,60 @@ server = do
             messageHandler
             liftIO $ messageServer newSocket queue outboundQ
             heartbeat
-            liftIO $ forkIO $ do
+            liftIO $ void $ forkIO $ do
                 prevVal <- atomically $ readTVar track
                 atomically $ writeTVar track $ Map.insert container outboundQ prevVal
 
-            liftIO $ forkIO $ do
+            liftIO $ void $ forkIO $ do
               let inotifyDirectories = case _inotify_watch <$> (Map.lookup container configMap) of
                                          Just (Just dirs) -> dirs
-                                         _ -> []
+                                         _ -> mempty
 
-              inotifyWatcher inotifyDirectories $ \dir -> \case
-                Created isDir filePath -> do
-                  let fullDir = dir </> (BLU.toString $ BS.fromStrict filePath)
-                      event = Just $ FileEvent (Container container) $ Bind $ fullDir
-                  messageLogic mounts heartbeat' outboundQ logQ event
-                Deleted isDir filePath -> do
-                  let fullDir = dir </> (BLU.toString $ BS.fromStrict filePath)
-                      event = Just $ FileEvent (Container container) $ Unbind $ fullDir
-                  messageLogic mounts heartbeat' outboundQ logQ event
-                Modified isDir (Just filePath) -> do
-                  let fullDir = dir </> (BLU.toString $ BS.fromStrict filePath)
-                      bindEvent = Just $ FileEvent (Container container) $ Bind fullDir
-                      ubindEvent = Just $ FileEvent (Container container) $ Unbind $ fullDir
-                  messageLogic mounts heartbeat' outboundQ logQ ubindEvent
-                  messageLogic mounts heartbeat' outboundQ logQ bindEvent
-                _ -> pure()
-            liftIO $ forkIO $ do
+              inotifyWatcher (Map.toList inotifyDirectories) $ \(dir, bindType) -> \event -> do
+                let bindEventType = case bindType of
+                                        Absolute -> BindDiffPath dir
+                                        Host -> Bind
+                    unbindEventType = case bindType of
+                                        Absolute -> UnbindABS
+                                        Host -> Unbind
+                case event of
+                  Created _ filePath' -> do
+                    let fullDir = dir </> (BLU.toString $ BS.fromStrict filePath')
+                        event' = Just $ FileEvent (Container container) $ bindEventType $ fullDir
+                    messageLogic mounts heartbeat' outboundQ logQ event'
+                  Deleted _ filePath' -> do
+                    let fullDir = dir </> (BLU.toString $ BS.fromStrict filePath')
+                        event' = Just $ FileEvent (Container container) $ unbindEventType $ fullDir
+                    messageLogic mounts heartbeat' outboundQ logQ event'
+                  Modified _ (Just filePath') -> do
+                    let fullDir = dir </> (BLU.toString $ BS.fromStrict filePath')
+                        bindEvent = Just $ FileEvent (Container container) $ bindEventType fullDir
+                        ubindEvent = Just $ FileEvent (Container container) $ unbindEventType $ fullDir
+                    messageLogic mounts heartbeat' outboundQ logQ ubindEvent
+                    messageLogic mounts heartbeat' outboundQ logQ bindEvent
+                  _ -> pure()
+            liftIO $ void $ forkIO $ do
                 let allowedEvents = _udev_filters <$> (Map.lookup container configMap)
                     allowedEvents' = case allowedEvents of
                                        Just (Just events) -> events
                                        _ -> []
-                    Just runUdev = _filter_udev_events <$> (Map.lookup container configMap)
+                    runUdev = case _filter_udev_events <$> (Map.lookup container configMap) of
+                                Just a -> a
+                                _ -> False
+
                     automount = _automount <$> (Map.lookup container configMap)
                     automount' = case automount of
-                                    Just (Just mounts) -> mounts
+                                    Just (Just mounts') -> mounts'
                                     _ -> []
-                forkIO $ do
+                void $ forkIO $ do
                     threadDelay $ 5 * second
                     flip mapM_ automount' $ \path -> do
                         logLevel logQ Info $ "Mounting path: " <> T.pack path
                         messageLogic mounts heartbeat' outboundQ logQ $
                           Just $ FileEvent (Container container) $ Bind $ path
                 when runUdev $ do
-                  print "Starting Udev listener"
-                  forkIO $ do
+                  logLevel logQ Info $ "Starting Udev listener"
+                  void $ forkIO $ do
                       threadDelay (3 * second)
                       udevEventStarter allSubSystems broadcast
                   udevChan <- atomically $ dupTChan broadcast
@@ -260,21 +261,21 @@ server = do
 
 heartbeat :: MonadIO m => ReaderT HostContext m ()
 heartbeat = do
-   (HostContext _ heartbeatRef _ logQ _) <- ask
+   (HostContext _ heartbeatRef _ _ _) <- ask
    liftIO $ putStrLn "Starting Heartbeat"
    void $ liftIO $ forkIO $ forever $ do
      time1 <- atomically $ readTVar heartbeatRef
      threadDelay (5 * second)
      time2 <- atomically $ readTVar heartbeatRef
      case time1 == time2 of
-       True -> print "Container died"
+       True -> putStrLn "Container died"
        False -> pure ()
 
 messageHandler :: MonadIO m => ReaderT HostContext m ()
 messageHandler = do
    (HostContext mounts heartbeatRef queue logQ outboundQ) <- ask
    void $ liftIO $ forkIO $ forever $ do
-     (msgB, conn) <- atomically $ readTQueue queue
+     (msgB, _) <- atomically $ readTQueue queue
      let (msg :: Maybe Message) = A.decode $ BS.fromStrict msgB
      messageLogic mounts heartbeatRef outboundQ logQ msg
 
@@ -285,9 +286,9 @@ messageLogic mounts heartbeatRef outboundQ logQ msg = case msg of
       mount <- atomically $ readTVar mounts
       let containerMounts' = Map.lookup container mount
           containerMounts = case containerMounts' of
-            Just mount -> mount
+            Just mounts' -> mounts'
             Nothing -> Set.empty
-      print "Got File Event!"
+      logLevel logQ Info "Got File Event!"
       let containerPath = "/yacc" </> T.unpack container </> "binds"
       createDirectoryIfMissing True containerPath
       case event of
@@ -324,10 +325,37 @@ messageLogic mounts heartbeatRef outboundQ logQ msg = case msg of
                 sendMessageQ outboundQ $ FileEvent (Container container) $ Unbind name
                 Mount.umount $ containerPath </> name
                 atomically $ writeTVar mounts modifiedMap
-        _ -> logContainer logQ Info container "Not Implemented!"
+        UnbindABS fp -> do
+            let newMounts = Set.delete fp containerMounts
+                modifiedMap = Map.insert container newMounts mount
+            print modifiedMap
+            case Set.member fp containerMounts of
+              False -> logLevel logQ Info "Refusing to unmount, not mounted"
+              _ -> do
+                  let name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
+                  sendMessageQ outboundQ $ FileEvent (Container container) $ UnbindABS name
+                  Mount.umount $ containerPath </> name
+                  atomically $ writeTVar mounts modifiedMap
+
+        BindDiffPath fp to -> do
+            let newMounts = Set.insert fp containerMounts
+                modifiedMap = Map.insert container newMounts mount
+                name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
+                directory = takeDirectory $ containerPath </> name
+            createDirectoryIfMissing True directory
+
+            mounted <- Mount.alreadyMounted $ containerPath </> name
+            case mounted of
+              True -> do
+                  sendMessageQ outboundQ $ FileEvent (Container container) $ BindDiffPath name to
+                  atomically $ writeTVar mounts modifiedMap
+              False -> do
+                  Mount.bind fp $ containerPath </> name
+                  sendMessageQ outboundQ $ FileEvent (Container container) $ BindDiffPath name to
+                  print modifiedMap
+                  atomically $ writeTVar mounts modifiedMap
 
   Just (HeartBeat beat client) -> do
-      r <- atomically $ readTVar heartbeatRef
       atomically $ writeTVar heartbeatRef beat
       logContainer logQ Info client ("Recieved HeartBeat: " <> (T.pack $ show beat))
       sendMessageQ outboundQ (Acknowledge ACK (HeartBeat beat client))
