@@ -211,6 +211,16 @@ server = do
                                        Just (Just events) -> events
                                        _ -> []
                     Just runUdev = _filter_udev_events <$> (Map.lookup container configMap)
+                    automount = _automount <$> (Map.lookup container configMap)
+                    automount' = case automount of
+                                    Just (Just mounts) -> mounts
+                                    Nothing -> []
+                forkIO $ do
+                    threadDelay $ 3 * second
+                    flip mapM_ automount' $ \path -> do
+                        logLevel logQ Info $ "Mounting path: " <> T.pack path
+                        messageLogic mounts heartbeat' outboundQ logQ $
+                          Just $ FileEvent (Container container) $ Bind $ path
                 when runUdev $ do
                   print "Starting Udev listener"
                   forkIO $ do
