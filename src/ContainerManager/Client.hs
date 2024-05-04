@@ -113,12 +113,12 @@ messageHandler = do
                          print $ "/host" </> directory
                          Mount.bind (path </> fp) $ "/host" </> name
              BindDiffPath fp to -> do
+                 print to
+                 print mount
                  mounted <- Mount.alreadyMounted to
                  case mounted of
                    True -> do
                        print "Already mounted!"
-                       print to
-                       print fp
                        let newSet = Set.insert to mount
                        atomically $ writeTVar mounts newSet
                    False -> case Set.member to mount of
