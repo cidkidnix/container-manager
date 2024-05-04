@@ -103,6 +103,7 @@ instance FromJSON Action
 
 data ContainerConfig = ContainerConfig
   { _filter_udev_events :: Bool
+  , _inotify_watch :: Maybe [String]
   , _udev_filters :: Maybe [String]
   , _automount :: Maybe [String]
   } deriving (Show, Eq, Ord, Generic)
@@ -133,6 +134,7 @@ instance Default ContainerConfig where
     def = ContainerConfig {
       _filter_udev_events = True,
       _udev_filters = Just ["hidraw"],
+      _inotify_watch = Nothing,
       _automount = Nothing
     }
 

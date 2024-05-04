@@ -35,6 +35,14 @@ import qualified System.Posix.Types as POSIX
 import qualified System.Posix.Files as POSIX
 import System.FilePath
 import System.Directory
+import System.INotify
+
+inotifyWatcher :: [String] -> (String -> (Event -> IO ())) -> IO ()
+inotifyWatcher directories cb = do
+  inotify <- initINotify
+  flip mapM_ directories $ \dir -> forkIO $ do
+    void $ addWatch inotify [Delete, Create] (BS.toStrict $ BLU.fromString dir) (cb dir)
+  forever $ threadDelay $ second * 100
 
 udevEventStarter :: [String] -> TChan (Message, Text) -> IO ()
 udevEventStarter subsystems conn = withUDev $ \interface -> do
@@ -202,6 +210,22 @@ server = do
             liftIO $ forkIO $ do
                 prevVal <- atomically $ readTVar track
                 atomically $ writeTVar track $ Map.insert container outboundQ prevVal
+
+            liftIO $ forkIO $ do
+              let inotifyDirectories = case _inotify_watch <$> (Map.lookup container configMap) of
+                                         Just (Just dirs) -> dirs
+                                         _ -> []
+
+              inotifyWatcher inotifyDirectories $ \dir -> \case
+                Created isDir filePath -> do
+                  let fullDir = dir </> (BLU.toString $ BS.fromStrict filePath)
+                      event = Just $ FileEvent (Container container) $ Bind $ fullDir
+                  messageLogic mounts heartbeat' outboundQ logQ event
+                Deleted isDir filePath -> do
+                  let fullDir = dir </> (BLU.toString $ BS.fromStrict filePath)
+                      event = Just $ FileEvent (Container container) $ Unbind $ fullDir
+                  messageLogic mounts heartbeat' outboundQ logQ event
+                _ -> pure()
             liftIO $ forkIO $ do
                 let allowedEvents = _udev_filters <$> (Map.lookup container configMap)
                     allowedEvents' = case allowedEvents of
