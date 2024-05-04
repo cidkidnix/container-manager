@@ -337,6 +337,7 @@ messageLogic mounts heartbeatRef outboundQ logQ msg = case msg of
             let newMounts = Set.delete fp containerMounts
                 modifiedMap = Map.insert container newMounts mount
             print modifiedMap
+            print fp
             case Set.member fp containerMounts of
               False -> logLevel logQ Info "UNBINDABS: Refusing to unmount, not mounted"
               _ -> do
@@ -359,6 +360,9 @@ messageLogic mounts heartbeatRef outboundQ logQ msg = case msg of
                 name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
                 directory = takeDirectory $ containerPath </> name
             createDirectoryIfMissing True directory
+            print modifiedMap
+            print fp
+            print to
 
             mounted <- Mount.alreadyMounted $ containerPath </> name
             case mounted of

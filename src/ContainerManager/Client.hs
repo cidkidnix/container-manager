@@ -135,6 +135,7 @@ messageHandler = do
 
              UnbindABS fp -> do
                  print "UNBINDABS"
+                 print fp
                  case Set.member fp mount of
                    False -> logLevel logQ Info "Refusing to unmount, not mounted"
                    True -> do
