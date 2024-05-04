@@ -82,15 +82,30 @@ udevWatcher conn = withUDev $ \interface -> do
             atomically $ writeTChan conn $ UDevEvent (convertAction action') (convertNode node')
         _ -> pure ()
 
-serveUDevEvent :: Text -> TQueue Message -> TChan Message -> IO ()
-serveUDevEvent container outboundQ udevChan = forever $ do
+serveUDevEvent :: Text -> TVar (Map Text (Set FilePath)) -> TQueue Message -> TChan Message -> IO ()
+serveUDevEvent container mounts outboundQ udevChan = forever $ do
   message <- atomically $ readTChan udevChan
+  mount <- atomically $ readTVar mounts
+  let containerMounts' = Map.lookup container mount
+      containerMounts = case containerMounts' of
+        Just mount -> mount
+        Nothing -> Set.empty
   case message of
     UDevEvent Add node -> do
       let fileName = takeFileName $ T.unpack $ unNode node
           hackPath = "/yacc" </> T.unpack container </> "udev"
       createDirectoryIfMissing True hackPath
-      Mount.bind (T.unpack $ unNode node) $ hackPath </> fileName
+      mounted <- Mount.alreadyMounted $ T.unpack $ unNode node
+      case mounted of
+        True -> do
+          let newSet = Set.insert (T.unpack $ unNode node) containerMounts
+              newMap = Map.insert container newSet mount
+          atomically $ writeTVar mounts newMap
+        False -> do
+          let newSet = Set.insert (T.unpack $ unNode node) containerMounts
+              newMap = Map.insert container newSet mount
+          atomically $ writeTVar mounts newMap
+          Mount.bind (T.unpack $ unNode node) $ hackPath </> fileName
     UDevEvent Remove node -> do
         let fileName = takeFileName $ T.unpack $ unNode node
             hackPath = "/yacc" </> T.unpack container </> "udev"
@@ -170,7 +185,7 @@ server = do
                     threadDelay (3 * second)
                     udevEventStarter broadcast
                 udevChan <- atomically $ dupTChan broadcast
-                serveUDevEvent container outboundQ udevChan
+                serveUDevEvent container mounts outboundQ udevChan
             liftIO $ forever $ threadDelay 1000000
         _ -> pure ()
 
@@ -213,15 +228,17 @@ messageLogic mounts heartbeatRef outboundQ logQ msg = case msg of
               True -> logLevel logQ Info "Refusing to mount, already mounted!"
               False -> do
                 let newMounts = Set.insert fp containerMounts
-                    modifiedMap = Map.update (\_ -> Just newMounts) container mount
+                    modifiedMap = Map.insert container newMounts mount
                     name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
                 print $ containerPath </> name
                 Mount.bind fp $ containerPath </> name
                 sendMessageQ outboundQ $ FileEvent (Container container) $ Bind name
+                print modifiedMap
                 atomically $ writeTVar mounts modifiedMap
         Unbind fp -> do
             let newMounts = Set.delete fp containerMounts
-                modifiedMap = Map.update (\_ -> Just newMounts) container mount
+                modifiedMap = Map.insert container newMounts mount
+            print modifiedMap
             let name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
             print $ containerPath </> name
             sendMessageQ outboundQ $ FileEvent (Container container) $ Unbind name

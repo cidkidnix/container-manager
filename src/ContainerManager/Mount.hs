@@ -4,6 +4,7 @@ import ContainerManager.Types
 
 import System.Process
 import System.Directory
+import System.Exit
 
 bind :: FilePath -> FilePath -> IO ()
 bind src dst = do
@@ -22,3 +23,15 @@ determineFileType fp = do
     case r of
       True -> pure Folder
       False -> pure File
+
+alreadyMounted :: FilePath -> IO Bool
+alreadyMounted fp = do
+    let args = proc "findmt" ["-T", fp]
+    (exitcode, _, _) <- readProcessWithExitCode "findmnt" ["-T", fp] ""
+    case exitcode of
+      ExitSuccess -> pure True
+      ExitFailure i -> case i of
+        1 -> pure False
+        _ -> do
+            print "Mount stack is full"
+            pure False
