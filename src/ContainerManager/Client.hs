@@ -119,7 +119,10 @@ messageHandler = do
                        False -> do
                          let name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
                              newSet = Set.insert fp mount
+                             directory = takeDirectory $ "/host" </> name
                          atomically $ writeTVar mounts newSet
+                         createDirectoryIfMissing True directory
+                         print $ "/host" </> directory
                          Mount.bind (path </> fp) $ "/host" </> name
              BindDiffPath  _ _ -> pure ()
              Unbind fp -> do
