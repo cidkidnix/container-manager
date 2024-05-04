@@ -262,7 +262,9 @@ messageLogic mounts heartbeatRef outboundQ logQ msg = case msg of
                 let newMounts = Set.insert fp containerMounts
                     modifiedMap = Map.insert container newMounts mount
                     name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
+                    directory = takeDirectory $ containerPath </> name
                 print $ containerPath </> name
+                createDirectoryIfMissing True directory
                 Mount.bind fp $ containerPath </> name
                 sendMessageQ outboundQ $ FileEvent (Container container) $ Bind name
                 print modifiedMap
