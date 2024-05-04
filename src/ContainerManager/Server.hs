@@ -341,9 +341,15 @@ messageLogic mounts heartbeatRef outboundQ logQ msg = case msg of
               False -> logLevel logQ Info "Refusing to unmount, not mounted"
               _ -> do
                   let name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
-                  sendMessageQ outboundQ $ FileEvent (Container container) $ UnbindABS fp
-                  Mount.umount $ containerPath </> name
-                  atomically $ writeTVar mounts modifiedMap
+                  mounted <- Mount.alreadyMounted $ containerPath </> name
+                  case mounted of
+                    True -> do
+                      sendMessageQ outboundQ $ FileEvent (Container container) $ UnbindABS fp
+                      Mount.umount $ containerPath </> name
+                      atomically $ writeTVar mounts modifiedMap
+                    False -> do
+                      sendMessageQ outboundQ $ FileEvent (Container container) $ UnbindABS fp
+                      atomically $ writeTVar mounts modifiedMap
 
         BindDiffPath fp to -> do
             let newMounts = Set.insert fp containerMounts
