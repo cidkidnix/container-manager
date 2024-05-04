@@ -214,7 +214,7 @@ server = do
                     automount = _automount <$> (Map.lookup container configMap)
                     automount' = case automount of
                                     Just (Just mounts) -> mounts
-                                    Nothing -> []
+                                    _ -> []
                 forkIO $ do
                     threadDelay $ 3 * second
                     flip mapM_ automount' $ \path -> do
