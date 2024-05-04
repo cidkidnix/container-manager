@@ -49,19 +49,6 @@ library
     default-language: Haskell2010
     ghc-options: -threaded
 
-executable container-manager
-    import:           warnings
-    main-is:          Main.hs
-    build-depends:
-        base ^>=4.17.2.1,
-        container-manager,
-        hostname,
-        text
-
-    hs-source-dirs:   exe
-    default-language: Haskell2010
-    ghc-options: -threaded
-
 executable container-util
   import: warnings
   main-is: Cli.hs
@@ -76,3 +63,24 @@ executable container-util
   default-language: Haskell2010
   ghc-options: -threaded
 
+executable server
+  import: warnings
+  main-is: Server.hs
+  build-depends:
+    base ^>=4.17.2.1,
+    container-manager
+  hs-source-dirs: exe
+  default-language: Haskell2010
+  ghc-options: -threaded
+
+executable client
+  import: warnings
+  main-is: Client.hs
+  build-depends:
+    base ^>=4.17.2.1,
+    container-manager,
+    hostname,
+    text
+  hs-source-dirs: exe
+  default-language: Haskell2010
+  ghc-options: -threaded

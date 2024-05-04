@@ -28,6 +28,7 @@ import qualified Data.ByteString as BS
 import qualified Data.Binary as BN
 import Control.Exception
 import qualified Data.Aeson as A
+import Data.Maybe
 
 import Control.Concurrent.Async
 import qualified System.Posix.Types as POSIX
@@ -35,10 +36,11 @@ import qualified System.Posix.Files as POSIX
 import System.FilePath
 import System.Directory
 
-udevEventStarter :: TChan Message -> IO ()
-udevEventStarter conn = withUDev $ \interface -> do
+udevEventStarter :: [String] -> TChan (Message, Text) -> IO ()
+udevEventStarter subsystems conn = withUDev $ \interface -> do
     enum <- newEnumerate interface
-    addMatchSubsystem enum "hidraw"
+    flip mapM_ subsystems $ \subsystem ->
+        addMatchSubsystem enum (BS.toStrict $ BLU.fromString subsystem)
     scanDevices enum
     entry <- getListEntry enum
     case entry of
@@ -46,29 +48,32 @@ udevEventStarter conn = withUDev $ \interface -> do
           name <- getName l
           v <- newFromSysPath interface name
           devices <- getDevices interface l
-          flip mapM_ ((Set.fromList [getDevnode v]) <> devices) $ \case
-            Just dev -> do
-              atomically $ writeTChan conn $ UDevEvent Add (convertNode dev)
-              print dev
-            Nothing -> pure ()
+          flip mapM_ ((Set.fromList [(getDevnode v, getSubsystem v)]) <> devices) $ \m ->
+            case m of
+              (Just dev, Just subsystem) -> do
+                atomically $ writeTChan conn $ (UDevEvent Add (convertNode dev), (convertSubsystem subsystem))
+                print dev
+                print subsystem
+              _ -> pure ()
       _ -> pure ()
 
-getDevices :: UDev -> List -> IO (Set (Maybe BS.ByteString))
+getDevices :: UDev -> List -> IO (Set (Maybe BS.ByteString, Maybe BS.ByteString))
 getDevices udev list  = getNext list >>= \case
     Nothing -> do
         path <- getName list
         v <- newFromSysPath udev path
-        pure $ Set.fromList [getDevnode v]
+        pure $ Set.fromList [(getDevnode v, getSubsystem v)]
     Just l -> do
         devices <- getDevices udev l
         curName <- getName l
         v <- newFromSysPath udev curName
-        pure $ devices <> Set.fromList [getDevnode v]
+        pure $ devices <> Set.fromList [(getDevnode v, getSubsystem v)]
 
-udevWatcher :: TChan Message -> IO ()
-udevWatcher conn = withUDev $ \interface -> do
+udevWatcher :: [String] -> TChan (Message, Text) -> IO ()
+udevWatcher subsystems conn = withUDev $ \interface -> do
     monitor <- newFromNetlink interface UDevId
-    filterAddMatchSubsystemDevtype monitor (BS.toStrict $ BLU.fromString "hidraw") Nothing
+    flip mapM_ subsystems $ \x ->
+        filterAddMatchSubsystemDevtype monitor (BS.toStrict $ BLU.fromString x) Nothing
     enableReceiving monitor
     monitorFD <- getFd monitor
     forever $ do
@@ -77,13 +82,14 @@ udevWatcher conn = withUDev $ \interface -> do
       dev <- receiveDevice monitor
       let node = getDevnode dev
       let action = getAction dev
-      case (node, action) of
-        (Just node', Just action') -> do
-            atomically $ writeTChan conn $ UDevEvent (convertAction action') (convertNode node')
+      let subsystem = getSubsystem dev
+      case (node, action, subsystem) of
+        (Just node', Just action', Just subsystem') -> do
+            atomically $ writeTChan conn $ (UDevEvent (convertAction action') (convertNode node'), convertSubsystem subsystem')
         _ -> pure ()
 
-serveUDevEvent :: Text -> TVar (Map Text (Set FilePath)) -> TQueue Message -> TChan Message -> IO ()
-serveUDevEvent container mounts outboundQ udevChan = forever $ do
+serveUDevEvent :: [String] -> Text -> TVar (Map Text (Set FilePath)) -> TQueue Message -> TChan (Message, Text) -> IO ()
+serveUDevEvent allowed container mounts outboundQ udevChan = forever $ do
   message <- atomically $ readTChan udevChan
   mount <- atomically $ readTVar mounts
   let containerMounts' = Map.lookup container mount
@@ -91,34 +97,42 @@ serveUDevEvent container mounts outboundQ udevChan = forever $ do
         Just mount -> mount
         Nothing -> Set.empty
   case message of
-    UDevEvent Add node -> do
-      let fileName = takeFileName $ T.unpack $ unNode node
-          hackPath = "/yacc" </> T.unpack container </> "udev"
-      createDirectoryIfMissing True hackPath
-      mounted <- Mount.alreadyMounted $ hackPath </> (takeFileName $ T.unpack $ unNode node)
-      print mounted
-      case mounted of
-        True -> do
-          let newSet = Set.insert (T.unpack $ unNode node) containerMounts
-              newMap = Map.insert container newSet mount
-          atomically $ writeTVar mounts newMap
-        False -> do
-          let newSet = Set.insert (T.unpack $ unNode node) containerMounts
-              newMap = Map.insert container newSet mount
-          atomically $ writeTVar mounts newMap
-          Mount.bind (T.unpack $ unNode node) $ hackPath </> fileName
-    UDevEvent Remove node -> do
-        let fileName = takeFileName $ T.unpack $ unNode node
+    (UDevEvent Add node, subsystem) -> do
+      let useEvent = (T.unpack subsystem) `elem` allowed
+      when useEvent $ do
+        print $ "Add Event for subsystem: " <> subsystem <> " allowed!"
+        let fileName = joinPath $ filter (\x -> x /= "/") $ splitPath $ T.unpack $ unNode $ node
             hackPath = "/yacc" </> T.unpack container </> "udev"
-        exists <- doesPathExist $ hackPath </> fileName
-        when exists $ do
-            Mount.umount $ hackPath </> fileName
-            removeFile $ hackPath </> fileName
-        let newSet = Set.delete (T.unpack $ unNode node) containerMounts
-            newMap = Map.insert container newSet mount
-        atomically $ writeTVar mounts newMap
+            directory = takeDirectory $ hackPath </> fileName
+        createDirectoryIfMissing True directory
+
+        mounted <- Mount.alreadyMounted $ hackPath </> fileName
+        print mounted
+        case mounted of
+          True -> do
+            let newSet = Set.insert (T.unpack $ unNode node) containerMounts
+                newMap = Map.insert container newSet mount
+            atomically $ writeTVar mounts newMap
+          False -> do
+            let newSet = Set.insert (T.unpack $ unNode node) containerMounts
+                newMap = Map.insert container newSet mount
+            atomically $ writeTVar mounts newMap
+            Mount.bind (T.unpack $ unNode node) $ hackPath </> fileName
+    (UDevEvent Remove node, subsystem) -> do
+        let useEvent = (T.unpack subsystem) `elem` allowed
+        when useEvent $ do
+          print $ "Remove Event for subsystem: " <> subsystem <> " allowed!"
+          let fileName = joinPath $ filter (\x -> x /= "/") $ splitPath $ T.unpack $ unNode $ node
+              hackPath = "/yacc" </> T.unpack container </> "udev"
+          exists <- doesPathExist $ hackPath </> fileName
+          when exists $ do
+              Mount.umount $ hackPath </> fileName
+              removeFile $ hackPath </> fileName
+          let newSet = Set.delete (T.unpack $ unNode node) containerMounts
+              newMap = Map.insert container newSet mount
+          atomically $ writeTVar mounts newMap
     _ -> pure ()
-  sendMessageQ outboundQ message
+  sendMessageQ outboundQ (fst message)
 
 initializeSocket :: Text -> IO Socket
 initializeSocket moveToLOC = do
@@ -130,6 +144,13 @@ initializeSocket moveToLOC = do
 
 server :: IO ()
 server = do
+    (config :: Maybe Config) <- (A.decode . BLU.fromString) <$> readFile "/etc/container-manager.conf"
+    let config' = case config of
+                   Nothing -> def
+                   Just conf -> conf
+        configMap = containerConfigs config'
+        allSubSystems = concat $ catMaybes $ map (_udev_filters . snd) (Map.toList configMap)
+    print config'
     containerConnect <- initializeSocket "/tmp/container-manager-bouncer.sock"
     cliConnect <- initializeSocket "/tmp/container-manager-cli.sock"
     logQ <- newTQueueIO
@@ -137,7 +158,7 @@ server = do
     (track :: TVar (Map Text (TQueue Message))) <- newTVarIO mempty
     broadcast <- newBroadcastTChanIO
     forkIO $ handleLogs logQ
-    forkIO $ udevWatcher broadcast
+    forkIO $ udevWatcher allSubSystems broadcast
     forkIO $ do
         queue <- newTQueueIO
         outboundQ <- newTQueueIO
@@ -185,11 +206,18 @@ server = do
                 prevVal <- atomically $ readTVar track
                 atomically $ writeTVar track $ Map.insert container outboundQ prevVal
             liftIO $ forkIO $ do
-                forkIO $ do
-                    threadDelay (3 * second)
-                    udevEventStarter broadcast
-                udevChan <- atomically $ dupTChan broadcast
-                serveUDevEvent container mounts outboundQ udevChan
+                let allowedEvents = _udev_filters <$> (Map.lookup container configMap)
+                    allowedEvents' = case allowedEvents of
+                                       Just (Just events) -> events
+                                       _ -> []
+                    Just runUdev = _filter_udev_events <$> (Map.lookup container configMap)
+                when runUdev $ do
+                  print "Starting Udev listener"
+                  forkIO $ do
+                      threadDelay (3 * second)
+                      udevEventStarter allSubSystems broadcast
+                  udevChan <- atomically $ dupTChan broadcast
+                  serveUDevEvent allowedEvents' container mounts outboundQ udevChan
             liftIO $ forever $ threadDelay 1000000
         _ -> pure ()
 

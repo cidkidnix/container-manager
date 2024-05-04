@@ -131,7 +131,7 @@ messageHandler = do
                      atomically $ writeTVar mounts newSet
                      Mount.umount $ "/host" </> name
        Just (UDevEvent action node) -> do
-           let fileName = takeFileName $ T.unpack $ unNode node
+           let fileName = joinPath $ filter (\x -> x /= "/") $ splitPath $ T.unpack $ unNode node
                hackPath = "/yacc/udev"
            case action of
              Add -> do

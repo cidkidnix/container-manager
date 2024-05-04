@@ -14,6 +14,7 @@ import Data.Time
 import Control.Concurrent.STM
 import Data.ByteString (ByteString)
 import Data.Aeson (ToJSON, FromJSON)
+import qualified Data.Map as Map
 
 -- Forgive me
 foreign import ccall "exit" exit :: IO ()
@@ -100,10 +101,16 @@ data Action = Remove
 instance ToJSON Action
 instance FromJSON Action
 
-data Config = Config
+data ContainerConfig = ContainerConfig
   { _filter_udev_events :: Bool
   , _udev_filters :: Maybe [String]
-  , _debug :: Bool
+  } deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON ContainerConfig
+instance FromJSON ContainerConfig
+
+data Config = Config
+  { containerConfigs :: Map Text ContainerConfig
   } deriving (Show, Eq, Ord, Generic)
 
 instance ToJSON Config
@@ -121,11 +128,15 @@ data ACK = ACK | NACK
 instance FromJSON ACK
 instance ToJSON ACK
 
+instance Default ContainerConfig where
+    def = ContainerConfig {
+      _filter_udev_events = True,
+      _udev_filters = Just ["hidraw"]
+    }
+
 instance Default Config where
     def = Config {
-      _filter_udev_events = True,
-      _udev_filters = Just ["hidraw"],
-      _debug = False
+      containerConfigs = Map.fromList [("default", def)]
     }
 
 instance PrettyName Message where

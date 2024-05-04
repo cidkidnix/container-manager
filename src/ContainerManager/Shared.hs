@@ -131,6 +131,9 @@ convertAction = \case
 convertNode :: BS.ByteString -> Node
 convertNode = Node . T.pack . BLU.toString . BS.fromStrict
 
+convertSubsystem :: BS.ByteString -> Text
+convertSubsystem = T.pack . BLU.toString . BS.fromStrict
+
 outboundQueue :: Socket -> TQueue Message -> IO ()
 outboundQueue conn queue = void $ forkIO $ forever $ do
         msg <- atomically $ readTQueue queue
