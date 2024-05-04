@@ -209,7 +209,7 @@ server = do
 
               inotifyWatcher (Map.toList inotifyDirectories) $ \(dir, bindType) -> \event -> do
                 let bindEventType = case bindType of
-                                        Absolute -> BindDiffPath dir
+                                        Absolute -> \x -> BindDiffPath x x
                                         Host -> Bind
                     unbindEventType = case bindType of
                                         Absolute -> UnbindABS
@@ -219,17 +219,20 @@ server = do
                     let fullDir = dir </> (BLU.toString $ BS.fromStrict filePath')
                         event' = Just $ FileEvent (Container container) $ bindEventType $ fullDir
                     messageLogic mounts heartbeat' outboundQ logQ event'
+                    print "created"
                   Deleted _ filePath' -> do
                     let fullDir = dir </> (BLU.toString $ BS.fromStrict filePath')
                         event' = Just $ FileEvent (Container container) $ unbindEventType $ fullDir
                     messageLogic mounts heartbeat' outboundQ logQ event'
+                    print "deleted"
                   Modified _ (Just filePath') -> do
                     let fullDir = dir </> (BLU.toString $ BS.fromStrict filePath')
                         bindEvent = Just $ FileEvent (Container container) $ bindEventType fullDir
                         ubindEvent = Just $ FileEvent (Container container) $ unbindEventType $ fullDir
                     messageLogic mounts heartbeat' outboundQ logQ ubindEvent
                     messageLogic mounts heartbeat' outboundQ logQ bindEvent
-                  _ -> pure()
+                    print "modified"
+                  a -> print a
             liftIO $ void $ forkIO $ do
                 let allowedEvents = _udev_filters <$> (Map.lookup container configMap)
                     allowedEvents' = case allowedEvents of
