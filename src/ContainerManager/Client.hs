@@ -115,14 +115,8 @@ messageHandler = do
              BindDiffPath fp to -> do
                  print to
                  print mount
-                 mounted <- Mount.alreadyMounted to
-                 case mounted of
-                   True -> do
-                       print "Already mounted!"
-                       let newSet = Set.insert to mount
-                       atomically $ writeTVar mounts newSet
-                   False -> case Set.member to mount of
-                      True -> pure ()
+                 case Set.member to mount of
+                      True -> print "Already mounted"
                       False -> do
                          let name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
                              newSet = Set.insert to mount
