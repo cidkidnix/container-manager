@@ -100,7 +100,9 @@ instance ToJSON Action
 instance FromJSON Action
 
 data Config = Config
-  { _socket_dir :: FilePath
+  { _filter_udev_events :: Bool
+  , _udev_filters :: Maybe [String]
+  , _debug :: Bool
   } deriving (Show, Eq, Ord, Generic)
 
 instance ToJSON Config
@@ -119,7 +121,11 @@ instance FromJSON ACK
 instance ToJSON ACK
 
 instance Default Config where
-    def = Config "/tmp/test.sock"
+    def = Config {
+      _filter_udev_events = True,
+      _udev_filters = Just ["hidraw"],
+      _debug = False
+    }
 
 instance PrettyName Message where
     prettyName = \case

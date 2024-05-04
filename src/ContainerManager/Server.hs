@@ -209,8 +209,10 @@ messageLogic heartbeatRef outboundQ logQ msg = case msg of
             sendMessageQ outboundQ $ FileEvent (Container container) $ Bind $ "/yacc" </> "binds" </> name
         BindDiffPath fp containerFP -> logContainer logQ Info container "Not Implemented!"
         Unbind fp -> do
-            sendMessageQ outboundQ $ FileEvent (Container container) $ Unbind $ "/yacc" </> "binds" </> fp
-            Mount.umount $ containerPath </> fp
+            let name = takeFileName fp
+            print $ containerPath </> name
+            sendMessageQ outboundQ $ FileEvent (Container container) $ Unbind $ "/yacc" </> "binds" </> name
+            Mount.umount $ containerPath </> name
 
   Just (HeartBeat beat client) -> do
       r <- atomically $ readTVar heartbeatRef

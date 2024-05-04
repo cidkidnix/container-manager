@@ -61,3 +61,18 @@ executable container-manager
     hs-source-dirs:   exe
     default-language: Haskell2010
     ghc-options: -threaded
+
+executable container-util
+  import: warnings
+  main-is: Cli.hs
+  build-depends:
+    base ^>=4.17.2.1,
+    container-manager,
+    hostname,
+    text,
+    network,
+    optparse-applicative
+  hs-source-dirs: exe
+  default-language: Haskell2010
+  ghc-options: -threaded
+
