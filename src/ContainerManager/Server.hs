@@ -367,13 +367,15 @@ messageLogic mounts heartbeatRef outboundQ logQ msg = case msg of
             mounted <- Mount.alreadyMounted $ containerPath </> name
             case mounted of
               True -> do
-                  sendMessageQ outboundQ $ FileEvent (Container container) $ BindDiffPath name to
                   atomically $ writeTVar mounts modifiedMap
+                  sendMessageQ outboundQ $ FileEvent (Container container) $ BindDiffPath name to
               False -> do
+                  atomically $ writeTVar mounts modifiedMap
                   Mount.bind fp $ containerPath </> name
                   sendMessageQ outboundQ $ FileEvent (Container container) $ BindDiffPath name to
                   print modifiedMap
-                  atomically $ writeTVar mounts modifiedMap
+            mounts''' <- atomically $ readTVar mounts
+            print mounts'''
 
   Just (HeartBeat beat client) -> do
       atomically $ writeTVar heartbeatRef beat
