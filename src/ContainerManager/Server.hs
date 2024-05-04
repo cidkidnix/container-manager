@@ -203,15 +203,15 @@ messageLogic heartbeatRef outboundQ logQ msg = case msg of
       createDirectoryIfMissing True containerPath
       case event of
         Bind fp -> do
-            let name = takeFileName fp
+            let name = drop 1 fp
             print $ containerPath </> name
             Mount.bind fp $ containerPath </> name
-            sendMessageQ outboundQ $ FileEvent (Container container) $ Bind $ "/yacc" </> "binds" </> name
+            sendMessageQ outboundQ $ FileEvent (Container container) $ Bind name
         BindDiffPath fp containerFP -> logContainer logQ Info container "Not Implemented!"
         Unbind fp -> do
-            let name = takeFileName fp
+            let name = drop 1 fp
             print $ containerPath </> name
-            sendMessageQ outboundQ $ FileEvent (Container container) $ Unbind $ "/yacc" </> "binds" </> name
+            sendMessageQ outboundQ $ FileEvent (Container container) $ Unbind name
             Mount.umount $ containerPath </> name
 
   Just (HeartBeat beat client) -> do

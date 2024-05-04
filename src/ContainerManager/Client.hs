@@ -106,10 +106,12 @@ messageHandler = do
            let path = "/yacc" </> "binds"
            case event of
              Bind fp -> do
-                 Mount.bind (path </> fp) fp
+                 let name = drop 1 fp
+                 Mount.bind (path </> fp) $ "/host" </> name
              BindDiffPath  _ _ -> pure ()
              Unbind fp -> do
-                 Mount.umount fp
+                 let name = drop 1 fp
+                 Mount.umount $ "/host" </> name
        Just (UDevEvent action node) -> do
            let fileName = takeFileName $ T.unpack $ unNode node
                hackPath = "/yacc/udev"
