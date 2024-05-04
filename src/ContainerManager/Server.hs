@@ -52,8 +52,6 @@ udevEventStarter subsystems conn = withUDev $ \interface -> do
             case m of
               (Just dev, Just subsystem) -> do
                 atomically $ writeTChan conn $ (UDevEvent Add (convertNode dev), (convertSubsystem subsystem))
-                print dev
-                print subsystem
               _ -> pure ()
       _ -> pure ()
 
@@ -100,14 +98,13 @@ serveUDevEvent allowed container mounts outboundQ udevChan = forever $ do
     (UDevEvent Add node, subsystem) -> do
       let useEvent = (T.unpack subsystem) `elem` allowed
       when useEvent $ do
-        print $ "Add Event for subsystem: " <> subsystem <> " allowed!"
+        putStrLn $ "Add Event for subsystem: " <> show subsystem <> " allowed!"
         let fileName = joinPath $ filter (\x -> x /= "/") $ splitPath $ T.unpack $ unNode $ node
             hackPath = "/yacc" </> T.unpack container </> "udev"
             directory = takeDirectory $ hackPath </> fileName
         createDirectoryIfMissing True directory
 
         mounted <- Mount.alreadyMounted $ hackPath </> fileName
-        print mounted
         case mounted of
           True -> do
             let newSet = Set.insert (T.unpack $ unNode node) containerMounts
@@ -121,7 +118,7 @@ serveUDevEvent allowed container mounts outboundQ udevChan = forever $ do
     (UDevEvent Remove node, subsystem) -> do
         let useEvent = (T.unpack subsystem) `elem` allowed
         when useEvent $ do
-          print $ "Remove Event for subsystem: " <> subsystem <> " allowed!"
+          putStrLn $ "Remove Event for subsystem: " <> show subsystem <> " allowed!"
           let fileName = joinPath $ filter (\x -> x /= "/") $ splitPath $ T.unpack $ unNode $ node
               hackPath = "/yacc" </> T.unpack container </> "udev"
           exists <- doesPathExist $ hackPath </> fileName
@@ -216,7 +213,7 @@ server = do
                                     Just (Just mounts) -> mounts
                                     _ -> []
                 forkIO $ do
-                    threadDelay $ 3 * second
+                    threadDelay $ 5 * second
                     flip mapM_ automount' $ \path -> do
                         logLevel logQ Info $ "Mounting path: " <> T.pack path
                         messageLogic mounts heartbeat' outboundQ logQ $
@@ -265,7 +262,6 @@ messageLogic mounts heartbeatRef outboundQ logQ msg = case msg of
       createDirectoryIfMissing True containerPath
       case event of
         Bind fp -> do
-            print mount
             case Set.member fp containerMounts of
               True -> logLevel logQ Info "Refusing to mount, already mounted!"
               False -> do
@@ -275,10 +271,17 @@ messageLogic mounts heartbeatRef outboundQ logQ msg = case msg of
                     directory = takeDirectory $ containerPath </> name
                 print $ containerPath </> name
                 createDirectoryIfMissing True directory
-                Mount.bind fp $ containerPath </> name
-                sendMessageQ outboundQ $ FileEvent (Container container) $ Bind name
-                print modifiedMap
-                atomically $ writeTVar mounts modifiedMap
+
+                mounted <- Mount.alreadyMounted $ containerPath </> name
+                case mounted of
+                  True -> do
+                    sendMessageQ outboundQ $ FileEvent (Container container) $ Bind fp
+                    atomically $ writeTVar mounts modifiedMap
+                  False -> do
+                    Mount.bind fp $ containerPath </> name
+                    sendMessageQ outboundQ $ FileEvent (Container container) $ Bind fp
+                    print modifiedMap
+                    atomically $ writeTVar mounts modifiedMap
         Unbind fp -> do
             let newMounts = Set.delete fp containerMounts
                 modifiedMap = Map.insert container newMounts mount
