@@ -41,7 +41,7 @@ inotifyWatcher :: [String] -> (String -> (Event -> IO ())) -> IO ()
 inotifyWatcher directories cb = do
   inotify <- initINotify
   flip mapM_ directories $ \dir -> forkIO $ do
-    void $ addWatch inotify [Delete, Create] (BS.toStrict $ BLU.fromString dir) (cb dir)
+    void $ addWatch inotify [Delete, Modify, Create] (BS.toStrict $ BLU.fromString dir) (cb dir)
   forever $ threadDelay $ second * 100
 
 udevEventStarter :: [String] -> TChan (Message, Text) -> IO ()
@@ -225,6 +225,12 @@ server = do
                   let fullDir = dir </> (BLU.toString $ BS.fromStrict filePath)
                       event = Just $ FileEvent (Container container) $ Unbind $ fullDir
                   messageLogic mounts heartbeat' outboundQ logQ event
+                Modified isDir (Just filePath) -> do
+                  let fullDir = dir </> (BLU.toString $ BS.fromStrict filePath)
+                      bindEvent = Just $ FileEvent (Container container) $ Bind fullDir
+                      ubindEvent = Just $ FileEvent (Container container) $ Unbind $ fullDir
+                  messageLogic mounts heartbeat' outboundQ logQ ubindEvent
+                  messageLogic mounts heartbeat' outboundQ logQ bindEvent
                 _ -> pure()
             liftIO $ forkIO $ do
                 let allowedEvents = _udev_filters <$> (Map.lookup container configMap)
