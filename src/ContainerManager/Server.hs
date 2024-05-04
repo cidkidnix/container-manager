@@ -114,6 +114,7 @@ server = do
     containerConnect <- initializeSocket "/tmp/container-manager-bouncer.sock"
     cliConnect <- initializeSocket "/tmp/container-manager-cli.sock"
     logQ <- newTQueueIO
+    mounts <- newTVarIO (mempty :: Map Text (Set FilePath))
     (track :: TVar (Map Text (TQueue Message))) <- newTVarIO mempty
     broadcast <- newBroadcastTChanIO
     forkIO $ handleLogs logQ
@@ -136,7 +137,7 @@ server = do
                 case containerExists of
                   Just containerQueue -> do
                       logLevel logQ Info $ "Forwarding File Event into the server queue"
-                      messageLogic heartbeatQ containerQueue logQ msg
+                      messageLogic mounts heartbeatQ containerQueue logQ msg
                       print container
                       print event
                   Nothing -> do
@@ -156,7 +157,6 @@ server = do
           currentTime <- getCurrentTime
           heartbeat' <- newTVarIO currentTime
           queue <- newTQueueIO
-          mounts <- newTVarIO (mempty :: Map Text (Set FilePath))
           outboundQ <- newTQueueIO
           void $ forkIO $ flip runReaderT (HostContext mounts heartbeat' queue logQ outboundQ) $ do
             messageHandler
@@ -188,31 +188,46 @@ heartbeat = do
 
 messageHandler :: MonadIO m => ReaderT HostContext m ()
 messageHandler = do
-   (HostContext _ heartbeatRef queue logQ outboundQ) <- ask
+   (HostContext mounts heartbeatRef queue logQ outboundQ) <- ask
    void $ liftIO $ forkIO $ forever $ do
      (msgB, conn) <- atomically $ readTQueue queue
      let (msg :: Maybe Message) = A.decode $ BS.fromStrict msgB
-     messageLogic heartbeatRef outboundQ logQ msg
+     messageLogic mounts heartbeatRef outboundQ logQ msg
 
-messageLogic :: TVar UTCTime -> TQueue Message -> TQueue Text -> Maybe Message -> IO ()
-messageLogic heartbeatRef outboundQ logQ msg = case msg of
+messageLogic :: TVar (Map Text (Set FilePath)) -> TVar UTCTime -> TQueue Message -> TQueue Text -> Maybe Message -> IO ()
+messageLogic mounts heartbeatRef outboundQ logQ msg = case msg of
   Nothing -> pure ()
   Just (FileEvent (Container container) event) -> do
+      mount <- atomically $ readTVar mounts
+      let containerMounts' = Map.lookup container mount
+          containerMounts = case containerMounts' of
+            Just mount -> mount
+            Nothing -> Set.empty
       print "Got File Event!"
       let containerPath = "/yacc" </> T.unpack container </> "binds"
       createDirectoryIfMissing True containerPath
       case event of
         Bind fp -> do
-            let name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
-            print $ containerPath </> name
-            Mount.bind fp $ containerPath </> name
-            sendMessageQ outboundQ $ FileEvent (Container container) $ Bind name
-        BindDiffPath fp containerFP -> logContainer logQ Info container "Not Implemented!"
+            print mount
+            case Set.member fp containerMounts of
+              True -> logLevel logQ Info "Refusing to mount, already mounted!"
+              False -> do
+                let newMounts = Set.insert fp containerMounts
+                    modifiedMap = Map.update (\_ -> Just newMounts) container mount
+                    name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
+                print $ containerPath </> name
+                Mount.bind fp $ containerPath </> name
+                sendMessageQ outboundQ $ FileEvent (Container container) $ Bind name
+                atomically $ writeTVar mounts modifiedMap
         Unbind fp -> do
+            let newMounts = Set.delete fp containerMounts
+                modifiedMap = Map.update (\_ -> Just newMounts) container mount
             let name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
             print $ containerPath </> name
             sendMessageQ outboundQ $ FileEvent (Container container) $ Unbind name
             Mount.umount $ containerPath </> name
+            atomically $ writeTVar mounts modifiedMap
+        _ -> logContainer logQ Info container "Not Implemented!"
 
   Just (HeartBeat beat client) -> do
       r <- atomically $ readTVar heartbeatRef
