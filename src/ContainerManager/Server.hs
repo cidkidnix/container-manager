@@ -275,11 +275,11 @@ messageLogic mounts heartbeatRef outboundQ logQ msg = case msg of
                 mounted <- Mount.alreadyMounted $ containerPath </> name
                 case mounted of
                   True -> do
-                    sendMessageQ outboundQ $ FileEvent (Container container) $ Bind fp
+                    sendMessageQ outboundQ $ FileEvent (Container container) $ Bind name
                     atomically $ writeTVar mounts modifiedMap
                   False -> do
                     Mount.bind fp $ containerPath </> name
-                    sendMessageQ outboundQ $ FileEvent (Container container) $ Bind fp
+                    sendMessageQ outboundQ $ FileEvent (Container container) $ Bind name
                     print modifiedMap
                     atomically $ writeTVar mounts modifiedMap
         Unbind fp -> do
