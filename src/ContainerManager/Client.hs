@@ -52,8 +52,9 @@ setupClient name = do
           liftIO $ clientMessageServer newSrv queue
           liftIO $ handleLogs logQ
           messageHandler $
-              flip runReaderT (ClientContext heartbeatRef queue logQ clientMounts) $ cb newSrv name
-          liftIO $ forever $ threadDelay $ 1000 * second
+            flip runReaderT (ClientContext heartbeatRef queue logQ clientMounts) $ cb newSrv name
+          liftIO $ forever $
+              threadDelay $ 1000 * second
       _ -> pure ()
     where
         cb :: MonadIO m => Socket -> Text -> ReaderT ClientContext m ()
@@ -65,6 +66,7 @@ setupClient name = do
 heartBeat :: MonadIO m => Socket -> Text -> ReaderT ClientContext m ()
 heartBeat sock containerName = do
     logQ <- asks _clientLog
+    liftIO $ print "Heartbeat"
     liftIO $ void $ forkIO $ forever $ do
       threadDelay (1 * second)
       time <- getCurrentTime
@@ -74,6 +76,7 @@ heartBeat sock containerName = do
 heartBeatAck :: MonadIO m => ReaderT ClientContext m ()
 heartBeatAck = do
     heartbeatRef <- asks _clientHeartbeatRef
+    liftIO $ print "HeartbeatAck"
     logQ <- asks _clientLog
     void $ liftIO $ forkIO $ forever $ do
       time1 <- atomically $ readTVar heartbeatRef
@@ -85,7 +88,7 @@ heartBeatAck = do
           logLevel logQ Error "Host Deamon is Dead, Forcing program stop, Goodbye"
           --exit
 
-messageHandler :: MonadIO m => (IO ()) -> ReaderT ClientContext m ()
+messageHandler :: MonadIO m => IO () -> ReaderT ClientContext m ()
 messageHandler cb = do
    (ClientContext heartbeatAck queue logQ mounts) <- ask
    v <- ask
@@ -93,7 +96,9 @@ messageHandler cb = do
      (msgB, _conn) <- atomically $ readTQueue queue
      let msg = A.decode $ BS.fromStrict msgB
      case msg of
-       Just (StartHeartBeat) -> cb
+       Just (StartHeartBeat) -> do
+           logLevel logQ Info $ "Starting Heartbeat"
+           void $ forkIO $ cb
        Just (Acknowledge ACK (HeartBeat time _)) -> do
            logLevel logQ Info $ "Got heartbeat back for " <> (T.pack $ show time)
            atomically $ writeTVar heartbeatAck time
@@ -165,4 +170,4 @@ messageHandler cb = do
                     removeFile $ T.unpack $ unNode node
 
        Just a -> logLevel logQ Warning $ prettyName a
-       Nothing -> pure ()
+       Nothing -> print msgB

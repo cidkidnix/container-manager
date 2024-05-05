@@ -165,17 +165,14 @@ server = do
         liftIO $ void $ forkIO $ forever $ do
           (msgB, _) <- atomically $ readTQueue queue
           let (msg :: Maybe Message) = A.decode $ BS.fromStrict msgB
-          print msgB
           case msg of
-            Just (FileEvent (Container container) event) -> do
+            Just (FileEvent (Container container) _) -> do
                 val <- atomically $ readTVar track
                 let containerExists = Map.lookup container val
                 case containerExists of
                   Just containerQueue -> do
                       logLevel logQ Info $ "Forwarding File Event into the server queue"
                       messageLogic mounts heartbeatQ containerQueue logQ msg
-                      print container
-                      print event
                   Nothing -> do
                       logLevel logQ Info "Container does not exist!"
 
@@ -219,21 +216,14 @@ server = do
                         event' = Just $ FileEvent (Container container) $ bindEventType $ fullDir
                     threadDelay second
                     messageLogic mounts heartbeat' outboundQ logQ event'
-                    print "created"
+                    logLevel logQ Info $ "INOTIFY Create Event"
                   Deleted _ filePath' -> do
                     let fullDir = dir </> (BLU.toString $ BS.fromStrict filePath')
                         event' = Just $ FileEvent (Container container) $ unbindEventType $ fullDir
                     threadDelay second
                     messageLogic mounts heartbeat' outboundQ logQ event'
-                    print "deleted"
-                  Modified _ (Just filePath') -> do
-                    let fullDir = dir </> (BLU.toString $ BS.fromStrict filePath')
-                        bindEvent = Just $ FileEvent (Container container) $ bindEventType fullDir
-                        ubindEvent = Just $ FileEvent (Container container) $ unbindEventType $ fullDir
-                    messageLogic mounts heartbeat' outboundQ logQ ubindEvent
-                    messageLogic mounts heartbeat' outboundQ logQ bindEvent
-                    print "modified"
-                  a -> print a
+                    logLevel logQ Info $ "INOTIFY Delete Event"
+                  a -> logLevel logQ Info $ T.pack $ show a
             liftIO $ void $ forkIO $ do
                 let allowedEvents = _udev_filters <$> (Map.lookup container configMap)
                     allowedEvents' = case allowedEvents of
@@ -255,6 +245,7 @@ server = do
                         logLevel logQ Info $ "Mounting path: " <> T.pack path
                         messageLogic mounts heartbeat' outboundQ logQ $
                           Just $ FileEvent (Container container) $ bindEventType $ path
+                    logLevel logQ Info $ "Starting Heartbeat"
                     messageLogic mounts heartbeat' outboundQ logQ $
                         Just $ StartHeartBeat
                     flip runReaderT (HostContext mounts heartbeat' queue logQ outboundQ) $
@@ -310,7 +301,8 @@ messageLogic mounts heartbeatRef outboundQ logQ msg = case msg of
                     modifiedMap = Map.insert container newMounts mount
                     name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
                     directory = takeDirectory $ containerPath </> name
-                print $ containerPath </> name
+                logLevel logQ Info $ T.pack $ containerPath </> name
+                logLevel logQ Info $ "New mount stack " <> (T.pack $ show modifiedMap)
                 createDirectoryIfMissing True directory
 
                 mounted <- Mount.alreadyMounted $ containerPath </> name
@@ -321,25 +313,23 @@ messageLogic mounts heartbeatRef outboundQ logQ msg = case msg of
                   False -> do
                     Mount.bind fp $ containerPath </> name
                     sendMessageQ outboundQ $ FileEvent (Container container) $ Bind name
-                    print modifiedMap
                     atomically $ writeTVar mounts modifiedMap
         Unbind fp -> do
             let newMounts = Set.delete fp containerMounts
                 modifiedMap = Map.insert container newMounts mount
-            print modifiedMap
+            logLevel logQ Info $ "New mount stack " <> (T.pack $ show modifiedMap)
             case Set.member fp containerMounts of
               False -> logLevel logQ Info "Refusing to unmount, not mounted"
               _ -> do
                 let name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
-                print $ containerPath </> name
+                logLevel logQ Info $ T.pack $ containerPath </> name
                 sendMessageQ outboundQ $ FileEvent (Container container) $ Unbind name
                 Mount.umount $ containerPath </> name
                 atomically $ writeTVar mounts modifiedMap
         UnbindABS fp -> do
             let newMounts = Set.delete fp containerMounts
                 modifiedMap = Map.insert container newMounts mount
-            print modifiedMap
-            print fp
+            logLevel logQ Info $ "New mount stack " <> (T.pack $ show modifiedMap)
             case Set.member fp containerMounts of
               False -> logLevel logQ Info "UNBINDABS: Refusing to unmount, not mounted"
               _ -> do
@@ -347,14 +337,11 @@ messageLogic mounts heartbeatRef outboundQ logQ msg = case msg of
                   mounted <- Mount.alreadyMounted $ containerPath </> name
                   case mounted of
                     True -> do
-                      sendMessageQ outboundQ $ FileEvent (Container container) $ UnbindABS fp
-                      print "UNBINDABS: sent message"
                       Mount.umount $ containerPath </> name
                       atomically $ writeTVar mounts modifiedMap
                     False -> do
-                      sendMessageQ outboundQ $ FileEvent (Container container) $ UnbindABS fp
-                      print "UNBINDABS: sent message"
                       atomically $ writeTVar mounts modifiedMap
+                  sendMessageQ outboundQ $ FileEvent (Container container) $ UnbindABS fp
 
         BindDiffPath fp to -> do
             let newMounts = Set.insert fp containerMounts
@@ -362,9 +349,7 @@ messageLogic mounts heartbeatRef outboundQ logQ msg = case msg of
                 name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
                 directory = takeDirectory $ containerPath </> name
             createDirectoryIfMissing True directory
-            print modifiedMap
-            print fp
-            print to
+            logLevel logQ Info $ "New mount stack " <> (T.pack $ show modifiedMap)
 
             mounted <- Mount.alreadyMounted $ containerPath </> name
             case mounted of
@@ -375,9 +360,6 @@ messageLogic mounts heartbeatRef outboundQ logQ msg = case msg of
                   atomically $ writeTVar mounts modifiedMap
                   Mount.bind fp $ containerPath </> name
                   sendMessageQ outboundQ $ FileEvent (Container container) $ BindDiffPath name to
-                  print modifiedMap
-            mounts''' <- atomically $ readTVar mounts
-            print mounts'''
 
   Just (HeartBeat beat client) -> do
       atomically $ writeTVar heartbeatRef beat
@@ -386,6 +368,8 @@ messageLogic mounts heartbeatRef outboundQ logQ msg = case msg of
       logContainer logQ Info client "Sending Heartbeat Acknowledgement"
 
   Just (StartHeartBeat) -> do
+      logLevel logQ Info $ "Sending Heartbeat Start to container"
+      threadDelay $ 5 * second
       sendMessageQ outboundQ StartHeartBeat
 
   Just (Setup container) -> do
