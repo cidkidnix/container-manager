@@ -49,13 +49,17 @@ setupClient name = do
         connect newSrv (SockAddrUnix $ T.unpack $ sock)
 
         flip runReaderT (ClientContext heartbeatRef queue logQ clientMounts) $ do
-          heartBeatAck
-          heartBeat newSrv name
           liftIO $ clientMessageServer newSrv queue
           liftIO $ handleLogs logQ
-          messageHandler
+          messageHandler $
+              flip runReaderT (ClientContext heartbeatRef queue logQ clientMounts) $ cb newSrv name
           liftIO $ forever $ threadDelay $ 1000 * second
       _ -> pure ()
+    where
+        cb :: MonadIO m => Socket -> Text -> ReaderT ClientContext m ()
+        cb newSrv name = do
+          heartBeatAck
+          heartBeat newSrv name
 
 
 heartBeat :: MonadIO m => Socket -> Text -> ReaderT ClientContext m ()
@@ -81,13 +85,15 @@ heartBeatAck = do
           logLevel logQ Error "Host Deamon is Dead, Forcing program stop, Goodbye"
           --exit
 
-messageHandler :: MonadIO m => ReaderT ClientContext m ()
-messageHandler = do
+messageHandler :: MonadIO m => (IO ()) -> ReaderT ClientContext m ()
+messageHandler cb = do
    (ClientContext heartbeatAck queue logQ mounts) <- ask
+   v <- ask
    void $ liftIO $ forkIO $ forever $ do
      (msgB, _conn) <- atomically $ readTQueue queue
      let msg = A.decode $ BS.fromStrict msgB
      case msg of
+       Just (StartHeartBeat) -> cb
        Just (Acknowledge ACK (HeartBeat time _)) -> do
            logLevel logQ Info $ "Got heartbeat back for " <> (T.pack $ show time)
            atomically $ writeTVar heartbeatAck time

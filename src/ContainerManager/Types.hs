@@ -63,6 +63,7 @@ data Message = FileEvent Container EventFile
              | Shutdown
              | UDevEvent Action Node
              | MoveToSocket MoveTo
+             | StartHeartBeat
              deriving (Show, Eq, Ord, Generic)
 
 instance ToJSON Message
@@ -164,6 +165,7 @@ instance PrettyName Message where
         ACK -> "ACK " <> prettyName msg
         NACK -> "NACK " <> prettyName msg
       Shutdown -> "Shutdown"
+      StartHeartBeat -> "StartHeartBeat"
 
 instance PrettyName LogLevel where
     prettyName = \case

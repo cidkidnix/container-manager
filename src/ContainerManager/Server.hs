@@ -197,7 +197,6 @@ server = do
           void $ forkIO $ flip runReaderT (HostContext mounts heartbeat' queue logQ outboundQ) $ do
             messageHandler
             liftIO $ messageServer newSocket queue outboundQ
-            heartbeat
             liftIO $ void $ forkIO $ do
                 prevVal <- atomically $ readTVar track
                 atomically $ writeTVar track $ Map.insert container outboundQ prevVal
@@ -249,7 +248,6 @@ server = do
                                     Just (Just mounts') -> mounts'
                                     _ -> mempty
                 void $ forkIO $ do
-                    threadDelay $ 5 * second
                     flip mapM_ (Map.toList automount') $ \(path, btype) -> do
                         let bindEventType = case btype of
                                         Absolute -> BindDiffPath path
@@ -257,6 +255,10 @@ server = do
                         logLevel logQ Info $ "Mounting path: " <> T.pack path
                         messageLogic mounts heartbeat' outboundQ logQ $
                           Just $ FileEvent (Container container) $ bindEventType $ path
+                    messageLogic mounts heartbeat' outboundQ logQ $
+                        Just $ StartHeartBeat
+                    flip runReaderT (HostContext mounts heartbeat' queue logQ outboundQ) $
+                        heartbeat
                 when runUdev $ do
                   logLevel logQ Info $ "Starting Udev listener"
                   void $ forkIO $ do
