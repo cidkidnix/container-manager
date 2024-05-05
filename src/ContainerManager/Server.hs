@@ -266,7 +266,7 @@ heartbeat = do
    liftIO $ putStrLn "Starting Heartbeat"
    void $ liftIO $ forkIO $ forever $ do
      time1 <- atomically $ readTVar heartbeatRef
-     threadDelay (5 * second)
+     threadDelay (120 * second)
      time2 <- atomically $ readTVar heartbeatRef
      case time1 == time2 of
        True -> putStrLn "Container died"
