@@ -14,8 +14,22 @@ bind src dst = do
       Folder -> createDirectoryIfMissing True dst
     callProcess "mount" [ "--bind", src, dst ]
 
+--bindWithRetry :: FilePath -> FilePath -> IO ()
+--bindWithRetry src dst = do
+--    ft <- determineFileType src
+--    case ft of
+--      File -> callProcess "touch" [dst]
+--      Folder -> createDirectoryIfMissing True dst
+--    (exitcode, _, _) <- readProcessWithExitCode "mount" ["--bind", src, dst]
+--    case exitcode of
+--      ExitSuccess -> pure ()
+--      ExitFailure _ -> do
+--          bindWithRetry src dst
+
 umount :: FilePath -> IO ()
-umount path = callProcess "umount" ["-R", path]
+umount path = do
+    (exitcode, _, _) <- readProcessWithExitCode "umount" ["-R", path] ""
+    pure ()
 
 determineFileType :: FilePath -> IO FileType
 determineFileType fp = do
@@ -26,7 +40,6 @@ determineFileType fp = do
 
 alreadyMounted :: FilePath -> IO Bool
 alreadyMounted fp = do
-    let args = proc "findmt" ["-T", fp]
     (exitcode, _, _) <- readProcessWithExitCode "findmnt" ["-T", fp] ""
     case exitcode of
       ExitSuccess -> pure True

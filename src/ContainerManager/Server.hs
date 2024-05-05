@@ -326,6 +326,7 @@ messageLogic mounts heartbeatRef outboundQ logQ msg = case msg of
                 sendMessageQ outboundQ $ FileEvent (Container container) $ Unbind name
                 Mount.umount $ containerPath </> name
                 atomically $ writeTVar mounts modifiedMap
+
         UnbindABS fp -> do
             let newMounts = Set.delete fp containerMounts
                 modifiedMap = Map.insert container newMounts mount

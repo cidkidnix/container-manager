@@ -144,10 +144,11 @@ messageHandler cb = do
                  case Set.member fp mount of
                    False -> logLevel logQ Info "Refusing to unmount, not mounted"
                    True -> do
-                       print mount
+                       let name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
                        let newSet = Set.delete fp mount
-                       print newSet
                        Mount.umount fp
+                       -- Make sure we remove the host binds
+                       Mount.umount $ path </> name
                        atomically $ writeTVar mounts newSet
              Unbind fp -> do
                  case Set.member fp mount of
@@ -157,6 +158,8 @@ messageHandler cb = do
                          newSet = Set.delete fp mount
                      atomically $ writeTVar mounts newSet
                      Mount.umount $ "/host" </> name
+                     -- Make sure we remove the host binds
+                     Mount.umount $ path </> name
        Just (UDevEvent action node) -> do
            let fileName = joinPath $ filter (\x -> x /= "/") $ splitPath $ T.unpack $ unNode node
                hackPath = "/yacc/udev"
