@@ -385,6 +385,9 @@ messageLogic mounts heartbeatRef outboundQ logQ msg = case msg of
       sendMessageQ outboundQ (Acknowledge ACK (HeartBeat beat client))
       logContainer logQ Info client "Sending Heartbeat Acknowledgement"
 
+  Just (StartHeartBeat) -> do
+      sendMessageQ outboundQ StartHeartBeat
+
   Just (Setup container) -> do
       logContainer logQ Info container "Requested Setup!"
       sendMessageQ outboundQ (Configure def)
