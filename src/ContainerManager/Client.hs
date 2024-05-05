@@ -68,7 +68,7 @@ heartBeat sock containerName = do
     logQ <- asks _clientLog
     liftIO $ print "Heartbeat"
     liftIO $ void $ forkIO $ forever $ do
-      threadDelay (60 * second)
+      threadDelay (30 * second)
       time <- getCurrentTime
       logContainer logQ Info containerName $ "Sending Heartbeat at " <> (T.pack $ show time)
       forkIO $ sendMessage sock (HeartBeat time containerName)
