@@ -29,6 +29,7 @@ import Data.Maybe
 import System.FilePath
 import System.Directory
 import System.INotify
+import System.IO
 
 inotifyWatcher :: [(String, BindType)] -> ((String, BindType) -> (Event -> IO ())) -> IO ()
 inotifyWatcher directories cb = do
@@ -142,6 +143,7 @@ initializeSocket moveToLOC = do
 
 server :: IO ()
 server = do
+    hSetBuffering stdout LineBuffering
     (config :: Maybe Config) <- (A.decode . BLU.fromString) <$> readFile "/etc/container-manager.conf"
     let config' = case config of
                    Nothing -> def
