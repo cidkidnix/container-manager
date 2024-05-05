@@ -1,7 +1,11 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 module ContainerManager.Mount where
 
 import ContainerManager.Types
 
+import qualified System.Linux.Mount as Mount
+
+import Control.Exception
 import System.Process
 import System.Directory
 import System.Exit
@@ -12,24 +16,22 @@ bind src dst = do
     case ft of
       File -> callProcess "touch" [dst]
       Folder -> createDirectoryIfMissing True dst
-    callProcess "mount" [ "--bind", src, dst ]
-
---bindWithRetry :: FilePath -> FilePath -> IO ()
---bindWithRetry src dst = do
---    ft <- determineFileType src
---    case ft of
---      File -> callProcess "touch" [dst]
---      Folder -> createDirectoryIfMissing True dst
---    (exitcode, _, _) <- readProcessWithExitCode "mount" ["--bind", src, dst]
---    case exitcode of
---      ExitSuccess -> pure ()
---      ExitFailure _ -> do
---          bindWithRetry src dst
+    (res :: Either IOException ()) <- try $ bind src dst
+    case res of
+      Left _ -> putStrLn "Error!"
+      Right _ -> pure ()
 
 umount :: FilePath -> IO ()
-umount path = do
-    (exitcode, _, _) <- readProcessWithExitCode "umount" ["-R", path] ""
-    pure ()
+umount fp = do
+    (res :: Either IOException ()) <- try $ Mount.umount fp
+    case res of
+      Left _ -> putStrLn "Error!"
+      Right _ -> pure ()
+
+refreshMount :: FilePath -> FilePath -> IO ()
+refreshMount src dst = do
+    umount dst
+    bind src dst
 
 determineFileType :: FilePath -> IO FileType
 determineFileType fp = do

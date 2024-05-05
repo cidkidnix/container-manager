@@ -308,6 +308,8 @@ messageLogic mounts heartbeatRef outboundQ logQ msg = case msg of
                 mounted <- Mount.alreadyMounted $ containerPath </> name
                 case mounted of
                   True -> do
+                    logLevel logQ Info $ "Path already mounted, refreshing mount"
+                    Mount.refreshMount fp $ containerPath </> name
                     sendMessageQ outboundQ $ FileEvent (Container container) $ Bind name
                     atomically $ writeTVar mounts modifiedMap
                   False -> do
@@ -355,6 +357,8 @@ messageLogic mounts heartbeatRef outboundQ logQ msg = case msg of
             mounted <- Mount.alreadyMounted $ containerPath </> name
             case mounted of
               True -> do
+                  logLevel logQ Info $ "Path already mounted, refreshing mount"
+                  Mount.refreshMount fp $ containerPath </> name
                   atomically $ writeTVar mounts modifiedMap
                   sendMessageQ outboundQ $ FileEvent (Container container) $ BindDiffPath name to
               False -> do
