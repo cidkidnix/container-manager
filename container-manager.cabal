@@ -23,7 +23,8 @@ library
                       ContainerManager.Cli,
                       ContainerManager.Shared,
                       ContainerManager.Types,
-                      ContainerManager.Mount
+                      ContainerManager.Mount,
+                      ContainerManager.Logger
 
     build-depends:    base ^>=4.17.2.1,
                       bytestring,

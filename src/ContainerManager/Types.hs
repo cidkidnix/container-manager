@@ -54,6 +54,9 @@ data ClientContext = ClientContext
     } deriving (Eq)
 
 
+data Filter = Filter FilePath
+            | NoFilter
+
 data Message = FileEvent Container EventFile
              | RunCommand !([Text])
              | HeartBeat !UTCTime !Text

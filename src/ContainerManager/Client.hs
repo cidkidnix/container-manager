@@ -4,6 +4,7 @@ module ContainerManager.Client where
 import ContainerManager.Types
 import ContainerManager.Shared
 import qualified ContainerManager.Mount as Mount
+import ContainerManager.Logger
 
 import Network.Socket hiding (Debug)
 import Control.Concurrent
@@ -13,7 +14,6 @@ import qualified Data.Set as Set
 
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Reader
-
 
 import qualified Data.ByteString as BS
 
@@ -58,40 +58,40 @@ setupClient name = do
       _ -> pure ()
     where
         cb :: MonadIO m => Socket -> Text -> ReaderT ClientContext m ()
-        cb newSrv name = do
+        cb newSrv name' = do
           heartBeatAck
-          heartBeat newSrv name
+          heartBeat newSrv name'
 
 
 heartBeat :: MonadIO m => Socket -> Text -> ReaderT ClientContext m ()
 heartBeat sock containerName = do
     logQ <- asks _clientLog
-    liftIO $ print "Heartbeat"
-    liftIO $ void $ forkIO $ forever $ do
-      threadDelay (30 * second)
-      time <- getCurrentTime
-      logContainer logQ Info containerName $ "Sending Heartbeat at " <> (T.pack $ show time)
-      forkIO $ sendMessage sock (HeartBeat time containerName)
+    liftIO $ do
+      logContainer logQ Info containerName $ "Starting heartbeat"
+      void $ forkIO $ forever $ do
+        threadDelay (30 * second)
+        time <- getCurrentTime
+        logContainer logQ Info containerName $ "Sending Heartbeat at " <> (T.pack $ show time)
+        forkIO $ sendMessage sock (HeartBeat time containerName)
 
 heartBeatAck :: MonadIO m => ReaderT ClientContext m ()
 heartBeatAck = do
     heartbeatRef <- asks _clientHeartbeatRef
-    liftIO $ print "HeartbeatAck"
     logQ <- asks _clientLog
-    void $ liftIO $ forkIO $ forever $ do
-      time1 <- atomically $ readTVar heartbeatRef
-      threadDelay (60 * second)
-      time2 <- atomically $ readTVar heartbeatRef
-      liftIO $ print time1
-      liftIO $ print time2
-      when (time1 == time2) $ do
-          logLevel logQ Error "Host Deamon is Dead, Forcing program stop, Goodbye"
-          --exit
+    liftIO $ do
+      logLevel logQ Info "Heartbeat Acknowledgement started"
+      void $ forkIO $ forever $ do
+        time1 <- atomically $ readTVar heartbeatRef
+        threadDelay (60 * second)
+        time2 <- atomically $ readTVar heartbeatRef
+        liftIO $ print time1
+        liftIO $ print time2
+        when (time1 == time2) $ do
+            logLevel logQ Error "Host Deamon is Dead, Forcing program stop, Goodbye"
 
 messageHandler :: MonadIO m => IO () -> ReaderT ClientContext m ()
 messageHandler cb = do
    (ClientContext heartbeatAck queue logQ mounts) <- ask
-   v <- ask
    void $ liftIO $ forkIO $ forever $ do
      (msgB, _conn) <- atomically $ readTQueue queue
      let msg = A.decode $ BS.fromStrict msgB
@@ -121,26 +121,19 @@ messageHandler cb = do
                              directory = takeDirectory $ "/host" </> name
                          atomically $ writeTVar mounts newSet
                          createDirectoryIfMissing True directory
-                         print $ "/host" </> directory
                          Mount.bind (path </> fp) $ "/host" </> name
              BindDiffPath fp to -> do
-                 print to
-                 print mount
                  case Set.member to mount of
-                      True -> print "Already mounted"
+                      True -> logLevel logQ Info "Already mounted"
                       False -> do
                          let name = joinPath $ filter (\x -> x /= "/") $ splitPath fp
                              newSet = Set.insert to mount
                              directory = takeDirectory $ name
                          atomically $ writeTVar mounts newSet
                          createDirectoryIfMissing True directory
-                         print $ path </> name
-                         print to
                          Mount.bind (path </> name) $ to
 
              UnbindABS fp -> do
-                 print "UNBINDABS"
-                 print fp
                  case Set.member fp mount of
                    False -> logLevel logQ Info "Refusing to unmount, not mounted"
                    True -> do
@@ -173,4 +166,4 @@ messageHandler cb = do
                     removeFile $ T.unpack $ unNode node
 
        Just a -> logLevel logQ Warning $ prettyName a
-       Nothing -> print msgB
+       Nothing -> logLevel logQ Info $ "Rejecting message: " <> (T.pack $ show $ msgB)

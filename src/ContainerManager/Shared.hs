@@ -93,28 +93,6 @@ safeSend sock msg f = do
       Left _  -> pure ()
       Right _ -> f
 
-handleLogs :: TQueue Text -> IO ()
-handleLogs logQ = void $ forkIO $ forever $ do
-    msg <- atomically $ readTQueue logQ
-    putStrLn $ T.unpack $ msg
-
-
-logContainer :: TQueue Text -> LogLevel -> Text -> Text -> IO ()
-logContainer logQ level container msg = do
-    let level' = (withColor level ("[" <> prettyName level <> "]"))
-        container' = ("\x1b[34m" <> "[" <> container <> "] " <> defaultC)
-        full = level' <> container' <> msg
-    atomically $ do
-        writeTQueue logQ full
-
-
-logLevel :: TQueue Text -> LogLevel -> Text -> IO ()
-logLevel logQ lvl msg = do
-    let level' = (withColor lvl ("[" <> prettyName lvl <> "] "))
-        full = level' <> msg
-    atomically $ do
-        writeTQueue logQ full
-
 second :: Int
 second = 1000000
 

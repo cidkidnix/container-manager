@@ -6,6 +6,7 @@ module ContainerManager.Server where
 import ContainerManager.Types
 import ContainerManager.Shared
 import qualified ContainerManager.Mount as Mount
+import ContainerManager.Logger
 
 import Network.Socket
 import Control.Monad
@@ -25,17 +26,22 @@ import qualified Data.ByteString.Lazy.UTF8 as BLU
 import Control.Concurrent.STM
 import qualified Data.Aeson as A
 import Data.Maybe
+import qualified System.Posix.Files as POSIX
 
 import System.FilePath
 import System.Directory
 import System.INotify
 import System.IO
 
-inotifyWatcher :: [(String, BindType)] -> ((String, BindType) -> (Event -> IO ())) -> IO ()
+inotifyWatcher :: [(String, BindType)] -> (((String, Filter), BindType) -> (Event -> IO ())) -> IO ()
 inotifyWatcher directories cb = do
   inotify <- initINotify
-  flip mapM_ directories $ \(dir, bindType) -> forkIO $ do
-    void $ addWatch inotify [Delete, Modify, Create] (BS.toStrict $ BLU.fromString dir) (cb (dir, bindType))
+  flip mapM_ directories $ \(path, bindType) -> forkIO $ do
+    fileStatus <- POSIX.getFileStatus path
+    let dir = case POSIX.isDirectory fileStatus of
+                True -> (path, NoFilter)
+                False -> (takeDirectory path, Filter path)
+    void $ addWatch inotify [Delete, Modify, Create] (BS.toStrict $ BLU.fromString (fst dir)) (cb (dir, bindType))
   forever $ threadDelay $ second * 100
 
 udevEventStarter :: [String] -> TChan (Message, Text) -> IO ()
@@ -205,7 +211,7 @@ server = do
                                          Just (Just dirs) -> dirs
                                          _ -> mempty
 
-              inotifyWatcher (Map.toList inotifyDirectories) $ \(dir, bindType) -> \event -> do
+              inotifyWatcher (Map.toList inotifyDirectories) $ \((dir, filterT), bindType) -> \event -> do
                 let bindEventType = case bindType of
                                         Absolute -> \x -> BindDiffPath x x
                                         Host -> Bind
@@ -215,10 +221,19 @@ server = do
                 case event of
                   Created _ filePath' -> do
                     let fullDir = dir </> (BLU.toString $ BS.fromStrict filePath')
-                        event' = Just $ FileEvent (Container container) $ bindEventType $ fullDir
-                    threadDelay second
-                    messageLogic mounts heartbeat' outboundQ logQ event'
-                    logLevel logQ Info $ "INOTIFY Create Event"
+                    case filterT of
+                      Filter fp -> when ((takeFileName fp) == (takeFileName fullDir)) $ do
+                        logLevel logQ Info $ "Inotify With Filter " <> T.pack fp
+                        let event' = Just $ FileEvent (Container container) $ bindEventType $ fullDir
+                        threadDelay second
+                        messageLogic mounts heartbeat' outboundQ logQ event'
+                        logLevel logQ Info $ "INOTIFY Create Event"
+                      NoFilter -> do
+                        logLevel logQ Info $ "Inotify No Filter"
+                        let event' = Just $ FileEvent (Container container) $ bindEventType $ fullDir
+                        threadDelay second
+                        messageLogic mounts heartbeat' outboundQ logQ event'
+                        logLevel logQ Info $ "INOTIFY Create Event"
                   Deleted _ filePath' -> do
                     let fullDir = dir </> (BLU.toString $ BS.fromStrict filePath')
                         event' = Just $ FileEvent (Container container) $ unbindEventType $ fullDir
