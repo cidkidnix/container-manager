@@ -20,6 +20,12 @@
       pkgs = inputs.nixpkgs.legacyPackages."${system}";
     in { default = (haskellPackages pkgs).container-manager; });
 
+    nixosModules = supportedSystems (system: {
+      default = import ./nix/modules/default.nix {
+        container-manager-pkg = inputs.self.packages."${system}".default;
+      };
+    });
+
     devShells = supportedSystems (system: let
       pkgs = inputs.nixpkgs.legacyPackages."${system}";
       hsPkgs = haskellPackages pkgs;
