@@ -108,6 +108,7 @@ instance FromJSON Action
 
 data BindType = Absolute
               | Host
+              | ToPath FilePath
         deriving (Show, Eq, Ord, Generic)
 
 instance ToJSON BindType

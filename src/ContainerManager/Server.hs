@@ -143,6 +143,9 @@ initializeSocket :: Text -> IO Socket
 initializeSocket moveToLOC = do
     containerConnect <- socket AF_UNIX (Stream) 1
     withFdSocket containerConnect setCloseOnExecIfNeeded
+    (doesPathExist $ T.unpack moveToLOC) >>= \case
+      True -> removeFile $ T.unpack moveToLOC
+      False -> pure ()
     bind containerConnect (SockAddrUnix $ T.unpack moveToLOC)
     listen containerConnect 10
     pure containerConnect
@@ -214,9 +217,11 @@ server = do
               inotifyWatcher (Map.toList inotifyDirectories) $ \((dir, filterT), bindType) -> \event -> do
                 let bindEventType = case bindType of
                                         Absolute -> \x -> BindDiffPath x x
+                                        ToPath y -> \x -> BindDiffPath x y
                                         Host -> Bind
                     unbindEventType = case bindType of
                                         Absolute -> UnbindABS
+                                        ToPath _ -> Unbind
                                         Host -> Unbind
                 case event of
                   Created _ filePath' -> do
@@ -258,6 +263,7 @@ server = do
                     flip mapM_ (Map.toList automount') $ \(path, btype) -> do
                         let bindEventType = case btype of
                                         Absolute -> BindDiffPath path
+                                        ToPath y -> \_ -> BindDiffPath path y
                                         Host -> Bind
                         logLevel logQ Info $ "Mounting path: " <> T.pack path
                         messageLogic mounts heartbeat' outboundQ logQ $
