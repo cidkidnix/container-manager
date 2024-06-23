@@ -759,10 +759,9 @@ in
                   };
                 };
 
-                hardware.opengl = mkIf (a.gpu.accel) {
+                hardware.graphics = mkIf (a.gpu.accel) {
                   enable = true;
-                  driSupport = true;
-                  driSupport32Bit = true;
+                  enable32Bit = true;
                 };
 
                 sound = mkIf a.audio.pipewire.enable {
