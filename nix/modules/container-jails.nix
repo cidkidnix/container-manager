@@ -764,25 +764,24 @@ in
                   enable32Bit = true;
                 };
 
-                sound = mkIf a.audio.pipewire.enable {
-                  enable = true;
-                  extraConfig = mkIf a.audio.pipewire.setup-alsa ''
-                    pcm_type.pipewire {
-                      libs.native = ${a.pkgs.pipewire.lib}/lib/alsa-lib/libasound_module_pcm_pipewire.so ;
-                      libs.32Bit = ${a.pkgs.pkgsi686Linux.pipewire.lib}/lib/alsa-lib/libasound_module_pcm_pipewire.so ;
-                    }
-                    ctl_type.pipewire {
-                      libs.native = ${a.pkgs.pipewire.lib}/lib/alsa-lib/libasound_module_ctl_pipewire.so ;
-                      libs.32Bit = ${a.pkgs.pkgsi686Linux.pipewire.lib}/lib/alsa-lib/libasound_module_ctl_pipewire.so ;
-                    }
-                    pcm.!default {
-                      type pipewire
-                    }
-                    ctl.!default {
-                      type pipewire
-                    }
-                  '';
-                };
+                #sound = mkIf a.audio.pipewire.enable {
+                #  extraConfig = mkIf a.audio.pipewire.setup-alsa ''
+                #    pcm_type.pipewire {
+                #      libs.native = ${a.pkgs.pipewire.lib}/lib/alsa-lib/libasound_module_pcm_pipewire.so ;
+                #      libs.32Bit = ${a.pkgs.pkgsi686Linux.pipewire.lib}/lib/alsa-lib/libasound_module_pcm_pipewire.so ;
+                #    }
+                #    ctl_type.pipewire {
+                #      libs.native = ${a.pkgs.pipewire.lib}/lib/alsa-lib/libasound_module_ctl_pipewire.so ;
+                #      libs.32Bit = ${a.pkgs.pkgsi686Linux.pipewire.lib}/lib/alsa-lib/libasound_module_ctl_pipewire.so ;
+                #    }
+                #    pcm.!default {
+                #      type pipewire
+                #    }
+                #    ctl.!default {
+                #      type pipewire
+                #    }
+                #  '';
+                #};
                 networking = {
                   hostName = c;
                   networkmanager.enable = a.network.private;
