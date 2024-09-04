@@ -375,6 +375,11 @@ in
       };
     in
     mkIf cfg.enable {
+      fileSystems."/yacc" = {
+        device = "none";
+        fsType = "tmpfs";
+        options = [ "defaults" "size=512m" "mode=755" ];
+      };
       # NOTE(Dylan Green): Generate desktop-files for host system, depending on if the user wants a
       # desktop file for the specified program
       environment.systemPackages = builtins.concatLists [
