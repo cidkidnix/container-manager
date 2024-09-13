@@ -833,6 +833,7 @@ in
                 };
               } // lib.optionalAttrs (a.gpu.nvidia) {
                 hardware.nvidia.package = config.hardware.nvidia.package;
+                hardware.nvidia.open = config.hardware.nvidia.open;
                 services.xserver.videoDrivers = [ "nvidia" ];
                 services.xserver.enable = true;
                 services.xserver.displayManager.lightdm.enable = lib.mkForce false;
