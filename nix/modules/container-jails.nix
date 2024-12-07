@@ -795,7 +795,7 @@ in
                   systemPackages = [ container-shim ] ++ (map (g: g.package) a.apps)
                   ++ lib.optionals a.gpu.accel (with a.pkgs; [
                     hicolor-icon-theme
-                    gnome.adwaita-icon-theme
+                    adwaita-icon-theme
                   ]);
 
                   variables = {
