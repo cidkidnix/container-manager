@@ -285,6 +285,8 @@ in
                 wayland = {
                   enable = mkEnableOption "gpu.wayland.enable";
 
+                  useXwaylandSatellite = mkEnableOption "gpu.wayland.useXwaylandSatellite";
+
                   socket = mkOption {
                     type = types.str;
                     default = "/run/user/1000/wayland-0";
@@ -762,6 +764,13 @@ in
                     wantedBy = [ "default.target" ];
                     script = "${link-user}/bin/link-user";
                   };
+                } // lib.optionalAttrs (a.gpu.wayland.useXwaylandSatellite) {
+
+                  xwayland = {
+                    after = [ "linkuser.service" ];
+                    wantedBy = [ "default.target" ];
+                    script = "${pkgs.xwayland-satellite}/bin/xwayland-satellite";
+                  };
                 };
 
                 hardware.graphics = mkIf (a.gpu.accel) {
@@ -808,8 +817,10 @@ in
                     __GLX_VENDOR_LIBRARY_NAME = "nvidia";
                   } // lib.optionalAttrs (a.gpu.wayland.enable) {
                     WAYLAND_DISPLAY = "/srv/run/user/1000/wayland-0";
-                  } // lib.optionalAttrs (a.gpu.x11.enable) {
+                  } // lib.optionalAttrs (a.gpu.x11.enable && (!a.gpu.wayland.useXwaylandSatellite)) {
                     DISPLAY = a.gpu.x11.display-var;
+                  } // lib.optionalAttrs (a.gpu.wayland.useXwaylandSatellite) {
+                    DISPLAY = ":0";
                   } // lib.optionalAttrs (a.audio.pipewire.enable || a.audio.pulseaudio.enable) {
                     PULSE_SERVER = "/srv/run/user/1000/pulse/native";
                   } // lib.optionalAttrs (a.dbus.share) {
