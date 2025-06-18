@@ -767,7 +767,7 @@ in
                 } // lib.optionalAttrs (a.gpu.wayland.useXwaylandSatellite) {
 
                   xwayland = {
-                    after = [ "linkuser.service" ];
+                    after = [ "default.target" ];
                     wantedBy = [ "default.target" ];
                     environment = {
                       WAYLAND_DISPLAY = "/srv/run/user/1000/wayland-0";
