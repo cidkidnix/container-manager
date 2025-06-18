@@ -769,6 +769,9 @@ in
                   xwayland = {
                     after = [ "linkuser.service" ];
                     wantedBy = [ "default.target" ];
+                    environment = {
+                      WAYLAND_DISPLAY = "/srv/run/user/1000/wayland-0";
+                    };
                     script = "${pkgs.xwayland-satellite}/bin/xwayland-satellite";
                   };
                 };
