@@ -714,13 +714,13 @@ in
 
             allowedDevices = allowedDevicesPre ++ a.extra.allowedDevices;
 
+            nixpkgs = a.pkgs.path;
+
             config = (
               {
                 imports = [
                   (a.extra.systemConfig)
                 ];
-
-                nixpkgs.config.allowUnfree = true;
 
                 systemd.services = {
                   "home-manager-setup" = {
@@ -767,6 +767,7 @@ in
                 } // lib.optionalAttrs (a.gpu.wayland.useXwaylandSatellite) {
 
                   xwayland = {
+
                     after = [ "default.target" ];
                     wantedBy = [ "default.target" ];
                     environment = {
