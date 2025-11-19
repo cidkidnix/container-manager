@@ -49,7 +49,7 @@ in
                 memory = {
                   enable = mkEnableOption "memory.enable";
                   max = mkOption {
-                    type = types.string;
+                    type = types.str;
                     default = {};
                   };
                 };
