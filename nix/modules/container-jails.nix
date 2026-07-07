@@ -333,7 +333,7 @@ in
   config =
     let
       enter-container = pkgs.writeShellScriptBin "enter-container" ''
-        machinectl shell --quiet --uid=container $1
+        machinectl shell --quiet --uid=$UID $1
       '';
 
       container-shim = pkgs.writeShellScriptBin "container-shim" ''
